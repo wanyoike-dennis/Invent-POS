@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Product = {
   id: number;
@@ -6,12 +6,9 @@ type Product = {
   category: string;
   price: number;
   stock: number;
-  status: "Active" | "Low Stock" | "Out of Stock";
 };
 
-const getStockStatus = (
-  stock: number
-): Product["status"] => {
+const getStockStatus = (stock: number) => {
   if (stock === 0) {
     return "Out of Stock";
   }
@@ -23,51 +20,9 @@ const getStockStatus = (
   return "Active";
 };
 
-const initialProducts: Product[] = [
-  {
-    id: 1,
-    name: "Wireless Mouse",
-    category: "Computer Accessories",
-    price: 1200,
-    stock: 25,
-    status: "Active",
-  },
-  {
-    id: 2,
-    name: "USB Keyboard",
-    category: "Computer Accessories",
-    price: 1500,
-    stock: 12,
-    status: "Active",
-  },
-  {
-    id: 3,
-    name: "HDMI Cable",
-    category: "Cables",
-    price: 800,
-    stock: 5,
-    status: "Low Stock",
-  },
-  {
-    id: 4,
-    name: "USB Type-C Cable",
-    category: "Cables",
-    price: 500,
-    stock: 3,
-    status: "Low Stock",
-  },
-  {
-    id: 5,
-    name: "Laptop Charger",
-    category: "Computer Accessories",
-    price: 2500,
-    stock: 0,
-    status: "Out of Stock",
-  },
-];
 
 function Products() {
-  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [showForm, setShowForm] = useState(false);
@@ -93,56 +48,66 @@ function Products() {
     return matchesSearch && matchesCategory;
   });
 
-const handleAddProduct = (e: React.FormEvent<HTMLFormElement>) => {
+const handleAddProduct = async (
+  e: React.FormEvent<HTMLFormElement>
+) => {
   e.preventDefault();
 
-  const stockNumber = Number(newProduct.stock);
+  const productData = {
+    name: newProduct.name.trim(),
+    category: newProduct.category,
+    price: Number(newProduct.price),
+    stock: Number(newProduct.stock),
+  };
 
-  const status =getStockStatus(stockNumber);
+  try {
+    if (editingProduct) {
+      const response = await fetch(
+        `http://localhost:5000/api/products/${editingProduct.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(productData),
+        }
+      );
 
-  if (editingProduct) {
-    const updatedProducts = products.map((product) =>
-      product.id === editingProduct.id
-        ? {
-            ...product,
-            name: newProduct.name.trim(),
-            category: newProduct.category,
-            price: Number(newProduct.price),
-            stock: stockNumber,
-            status,
-          }
-        : product
-    );
+      if (!response.ok) {
+        throw new Error("Failed to update product");
+      }
+    } else {
+      const response = await fetch(
+        "http://localhost:5000/api/products",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(productData),
+        }
+      );
 
-    setProducts(updatedProducts);
-  } else {
-    const product: Product = {
-      id:
-        products.length > 0
-          ? Math.max(...products.map((p) => p.id)) + 1
-          : 1,
-      name: newProduct.name.trim(),
-      category: newProduct.category,
-      price: Number(newProduct.price),
-      stock: stockNumber,
-      status,
-    };
+      if (!response.ok) {
+        throw new Error("Failed to add product");
+      }
+    }
 
-    setProducts((currentProducts) => [
-      ...currentProducts,
-      product,
-    ]);
+    await fetchProducts();
+
+    setNewProduct({
+      name: "",
+      category: "",
+      price: "",
+      stock: "",
+    });
+
+    setEditingProduct(null);
+    setShowForm(false);
+
+  } catch (error) {
+    console.error("Error saving product:", error);
   }
-
-  setNewProduct({
-    name: "",
-    category: "",
-    price: "",
-    stock: "",
-  });
-
-  setEditingProduct(null);
-  setShowForm(false);
 };
 
   const closeForm = () => {
@@ -170,7 +135,7 @@ const handleEditProduct = (product: Product) => {
   setShowForm(true);
 };
 
-const handleDeleteProduct = (id: number) => {
+const handleDeleteProduct = async (id: number) => {
   const confirmed = window.confirm(
     "Are you sure you want to delete this product?"
   );
@@ -179,12 +144,46 @@ const handleDeleteProduct = (id: number) => {
     return;
   }
 
-  setProducts((currentProducts) =>
-    currentProducts.filter((product) => product.id !== id)
-  );
+  try {
+    const response = await fetch(
+      `http://localhost:5000/api/products/${id}`,
+      {
+        method: "DELETE",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to delete product");
+    }
+
+    await fetchProducts();
+
+  } catch (error) {
+    console.error("Error deleting product:", error);
+  }
 };
 
+const fetchProducts = async () => {
+  try {
+    const response = await fetch(
+      "http://localhost:5000/api/products"
+    );
 
+    if (!response.ok) {
+      throw new Error("Failed to fetch products");
+    }
+
+    const data = await response.json();
+
+    setProducts(data);
+  } catch (error) {
+    console.error("Error loading products:", error);
+  }
+};
+
+useEffect(() => {
+  fetchProducts();
+}, []);
 
   return (
     <div className="space-y-6">
@@ -466,14 +465,14 @@ const handleDeleteProduct = (id: number) => {
                     <td className="px-6 py-4">
                       <span
                         className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${
-                          product.status === "Active"
+                         getStockStatus(product.stock) === "Active"
                             ? "bg-green-100 text-green-700"
-                            : product.status === "Low Stock"
+                            : getStockStatus(product.stock) === "Low Stock"
                             ? "bg-orange-100 text-orange-700"
                             : "bg-red-100 text-red-700"
                         }`}
                       >
-                        {product.status}
+                        {getStockStatus(product.stock)}
                       </span>
                     </td>
 
