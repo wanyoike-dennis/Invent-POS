@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -16,34 +16,66 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
-    <BrowserRouter>
+    <Routes>
 
-      <Routes>
+      {/* Public route */}
+      <Route path="/" element={<Login />} />
 
-        {/* Login */}
-        <Route path="/" element={<Login />} />
+      {/* Protected routes */}
+      <Route element={<ProtectedRoute />}>
 
-        {/**protected route */}
-         <Route element={<ProtectedRoute />}></Route>
-
-        {/* Application */}
         <Route element={<MainLayout />}>
 
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/sales" element={<Sales />} />
-          <Route path="/customers" element={<Customers />} />
-          <Route path="/suppliers" element={<Suppliers />} />
-          <Route path="/expenses" element={<Expenses />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route
+            path="/dashboard"
+            element={<Dashboard />}
+          />
+
+          <Route
+            path="/products"
+            element={<Products />}
+          />
+
+          <Route
+            path="/inventory"
+            element={<Inventory />}
+          />
+
+          <Route
+            path="/sales"
+            element={<Sales />}
+          />
+
+          <Route
+            path="/customers"
+            element={<Customers />}
+          />
+
+          <Route
+            path="/suppliers"
+            element={<Suppliers />}
+          />
+
+          <Route
+            path="/expenses"
+            element={<Expenses />}
+          />
+
+          <Route
+            path="/reports"
+            element={<Reports />}
+          />
+
+          <Route
+            path="/settings"
+            element={<Settings />}
+          />
 
         </Route>
 
-      </Routes>
+      </Route>
 
-    </BrowserRouter>
+    </Routes>
   );
 }
 
