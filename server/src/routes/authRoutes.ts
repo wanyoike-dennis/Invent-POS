@@ -1,7 +1,7 @@
 import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import db from "../database/db";
+import db from "../database/db.js";
 
 const router = express.Router();
 
@@ -20,7 +20,7 @@ router.post("/register", async (req, res) => {
   try {
     const existingUser = db
       .prepare("SELECT * FROM users WHERE email = ?")
-      .get(email);
+      .get(email.trim().toLowerCase());
 
     if (existingUser) {
       return res.status(400).json({
@@ -28,10 +28,7 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(
-      password,
-      10
-    );
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const result = db
       .prepare(`
@@ -55,6 +52,8 @@ router.post("/register", async (req, res) => {
       userId: result.lastInsertRowid,
     });
   } catch (error) {
+    console.error(error);
+
     res.status(500).json({
       message: "Failed to register user",
     });
@@ -88,11 +87,10 @@ router.post("/login", async (req, res) => {
     });
   }
 
-  const passwordMatches =
-    await bcrypt.compare(
-      password,
-      user.password
-    );
+  const passwordMatches = await bcrypt.compare(
+    password,
+    user.password
+  );
 
   if (!passwordMatches) {
     return res.status(401).json({
