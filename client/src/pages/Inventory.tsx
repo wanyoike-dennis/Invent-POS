@@ -9,8 +9,12 @@ type Product = {
 };
 
 function Inventory() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
+const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+const [adjustmentType, setAdjustmentType] = useState<"in" | "out">("in");
+const [quantity, setQuantity] = useState("");
+const [reason, setReason] = useState("");  
+const [products, setProducts] = useState<Product[]>([]);
+const [searchTerm, setSearchTerm] = useState("");
 
   const fetchProducts = async () => {
     try {
@@ -65,8 +69,183 @@ function Inventory() {
     (product) => product.stock === 0
   ).length;
 
+  const handleStockAdjustment = async (
+  e: React.FormEvent<HTMLFormElement>
+) => {
+  e.preventDefault();
+
+  if (!selectedProduct) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `http://localhost:5000/api/products/${selectedProduct.id}/stock`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: adjustmentType,
+          quantity: Number(quantity),
+          reason,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      alert(errorData.message || "Failed to adjust stock");
+      return;
+    }
+
+    await fetchProducts();
+
+    setSelectedProduct(null);
+    setQuantity("");
+    setReason("");
+    setAdjustmentType("in");
+  } catch (error) {
+    console.error("Error adjusting stock:", error);
+  }
+};
+
+
+
   return (
     <div className="space-y-6">
+
+        {/*modal */}
+        {selectedProduct && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+
+    <div className="w-full max-w-md rounded-xl bg-white shadow-xl">
+
+      <div className="flex items-center justify-between border-b border-slate-200 p-5">
+
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">
+            Adjust Stock
+          </h2>
+
+          <p className="text-sm text-slate-500">
+            {selectedProduct.name}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedProduct(null);
+            setQuantity("");
+            setReason("");
+          }}
+          className="text-2xl text-slate-400 hover:text-slate-700"
+        >
+          ×
+        </button>
+
+      </div>
+
+      <form
+        onSubmit={handleStockAdjustment}
+        className="space-y-4 p-5"
+      >
+
+        <div className="rounded-lg bg-slate-50 p-3">
+          <p className="text-sm text-slate-500">
+            Current Stock
+          </p>
+
+          <p className="text-xl font-bold text-slate-800">
+            {selectedProduct.stock}
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Adjustment Type
+          </label>
+
+          <select
+            value={adjustmentType}
+            onChange={(e) =>
+              setAdjustmentType(
+                e.target.value as "in" | "out"
+              )
+            }
+            className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="in">
+              Stock In
+            </option>
+
+            <option value="out">
+              Stock Out
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Quantity
+          </label>
+
+          <input
+            type="number"
+            required
+            min="1"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="Enter quantity"
+            className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700">
+            Reason
+          </label>
+
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. New stock received"
+            rows={3}
+            className="w-full resize-none rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 pt-2">
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedProduct(null);
+              setQuantity("");
+              setReason("");
+            }}
+            className="rounded-lg border border-slate-300 px-4 py-2.5 text-slate-700 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            className="rounded-lg bg-blue-600 px-5 py-2.5 text-white hover:bg-blue-700"
+          >
+            Update Stock
+          </button>
+
+        </div>
+
+      </form>
+
+    </div>
+
+  </div>
+)}
 
       {/* Heading */}
       <div>
@@ -228,11 +407,12 @@ function Inventory() {
                     <td className="px-6 py-4">
 
                       <button
-                        type="button"
-                        className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-100"
-                      >
-                        Adjust Stock
-                      </button>
+  type="button"
+  onClick={() => setSelectedProduct(product)}
+  className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-100"
+>
+  Adjust Stock
+</button>
 
                     </td>
 

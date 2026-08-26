@@ -63,4 +63,61 @@ router.delete("/:id", (req, res) => {
   });
 });
 
+router.patch("/:id/stock", (req, res) => {
+  const { id } = req.params;
+  const { type, quantity } = req.body;
+
+  const product = db
+    .prepare("SELECT * FROM products WHERE id = ?")
+    .get(id) as {
+      id: number;
+      stock: number;
+    } | undefined;
+
+  if (!product) {
+    return res.status(404).json({
+      message: "Product not found",
+    });
+  }
+
+  const qty = Number(quantity);
+
+  if (!qty || qty <= 0) {
+    return res.status(400).json({
+      message: "Quantity must be greater than 0",
+    });
+  }
+
+  let newStock = product.stock;
+
+  if (type === "in") {
+    newStock += qty;
+  } else if (type === "out") {
+    if (qty > product.stock) {
+      return res.status(400).json({
+        message: "Not enough stock available",
+      });
+    }
+
+    newStock -= qty;
+  } else {
+    return res.status(400).json({
+      message: "Invalid stock adjustment type",
+    });
+  }
+
+  db.prepare(`
+    UPDATE products
+    SET stock = ?
+    WHERE id = ?
+  `).run(newStock, id);
+
+  const updatedProduct = db
+    .prepare("SELECT * FROM products WHERE id = ?")
+    .get(id);
+
+  res.json(updatedProduct);
+});
+
+
 export default router;
