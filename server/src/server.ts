@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import productRoutes from "./routes/productRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
+import { authenticateToken } from "./middleware/authMiddleware.js";
 
 dotenv.config();
 
@@ -19,8 +20,8 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
-app.use("/api/products", productRoutes);
-app.use("/api/categories", categoryRoutes);
+app.use("/api/products", authenticateToken, productRoutes);
+app.use("/api/categories", authenticateToken, categoryRoutes);
 
 
 const PORT = process.env.PORT || 5000;
