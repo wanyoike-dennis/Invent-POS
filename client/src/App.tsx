@@ -12,6 +12,7 @@ import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 
 import MainLayout from "./layouts/MainLayout";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
@@ -21,6 +22,9 @@ function App() {
 
         {/* Login */}
         <Route path="/" element={<Login />} />
+
+        {/**protected route */}
+         <Route element={<ProtectedRoute />}></Route>
 
         {/* Application */}
         <Route element={<MainLayout />}>
