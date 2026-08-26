@@ -27,6 +27,24 @@ import {
 function MainLayout() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  
+
+  const storedUser = localStorage.getItem("user");
+
+const user = storedUser
+  ? JSON.parse(storedUser)
+  : null;
+
+  const initials = user?.name
+  ? user.name
+      .split(" ")
+      .map((name: string) => name[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase()
+  : "US";
 
 const handleLogout = () => {
   localStorage.removeItem("token");
@@ -225,11 +243,11 @@ const handleLogout = () => {
             <div className="min-w-0 flex-1">
 
               <p className="truncate text-sm font-medium text-white">
-                Admin User
+                {user?.name || "User"}
               </p>
 
               <p className="truncate text-xs text-slate-400">
-                Administrator
+                {user?.role || "User"}
               </p>
 
             </div>
@@ -304,17 +322,17 @@ const handleLogout = () => {
             >
 
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
-                AD
+                {initials}
               </div>
 
               <div className="hidden text-left sm:block">
 
                 <p className="text-sm font-medium text-slate-800">
-                  Admin User
+                  {user?.name || "User"}
                 </p>
 
                 <p className="text-xs text-slate-500">
-                  Administrator
+                  {user?.role || "User"}
                 </p>
 
               </div>

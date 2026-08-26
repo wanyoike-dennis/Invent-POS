@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../services/api";
 
 type Product = {
   id: number;
@@ -45,8 +46,8 @@ function Products() {
 
   const fetchCategories = async () => {
   try {
-    const response = await fetch(
-      "http://localhost:5000/api/categories"
+    const response = await apiFetch(
+      "/api/categories"
     );
 
     if (!response.ok) {
@@ -87,8 +88,8 @@ const handleAddProduct = async (
 
   try {
     if (editingProduct) {
-      const response = await fetch(
-        `http://localhost:5000/api/products/${editingProduct.id}`,
+      const response = await apiFetch(
+        `/api/products/${editingProduct.id}`,
         {
           method: "PUT",
           headers: {
@@ -170,8 +171,8 @@ const handleDeleteProduct = async (id: number) => {
   }
 
   try {
-    const response = await fetch(
-      `http://localhost:5000/api/products/${id}`,
+    const response = await apiFetch(
+      `/api/products/${id}`,
       {
         method: "DELETE",
       }
@@ -190,8 +191,8 @@ const handleDeleteProduct = async (id: number) => {
 
 const fetchProducts = async () => {
   try {
-    const response = await fetch(
-      "http://localhost:5000/api/products"
+    const response = await apiFetch(
+      "/api/products"
     );
 
     if (!response.ok) {
@@ -221,8 +222,8 @@ const handleAddCategory = async (
   }
 
   try {
-    const response = await fetch(
-      "http://localhost:5000/api/categories",
+    const response = await apiFetch(
+      "/api/categories",
       {
         method: "POST",
         headers: {
@@ -256,8 +257,8 @@ const handleDeleteCategory = async (id: number) => {
   }
 
   try {
-    const response = await fetch(
-      `http://localhost:5000/api/categories/${id}`,
+    const response = await apiFetch(
+      `/api/categories/${id}`,
       {
         method: "DELETE",
       }

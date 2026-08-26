@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../services/api";
 
 type Product = {
   id: number;
@@ -30,8 +31,8 @@ const [searchTerm, setSearchTerm] = useState("");
 
 const fetchStockMovements = async () => {
   try {
-    const response = await fetch(
-      "http://localhost:5000/api/products/stock/history"
+    const response = await apiFetch(
+      "/api/products/stock/history"
     );
 
     if (!response.ok) {
@@ -50,8 +51,8 @@ const fetchStockMovements = async () => {
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch(
-        "http://localhost:5000/api/products"
+      const response = await apiFetch(
+        "/api/products"
       );
 
       if (!response.ok) {
@@ -112,8 +113,8 @@ const fetchStockMovements = async () => {
   }
 
   try {
-    const response = await fetch(
-      `http://localhost:5000/api/products/${selectedProduct.id}/stock`,
+    const response = await apiFetch(
+      `/api/products/${selectedProduct.id}/stock`,
       {
         method: "PATCH",
         headers: {
