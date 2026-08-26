@@ -27,6 +27,7 @@ const getStockStatus = (stock: number) => {
 
 
 function Products() {
+  const [newCategory, setNewCategory] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -209,6 +210,68 @@ useEffect(() => {
   fetchProducts();
   fetchCategories();
 }, []);
+
+const handleAddCategory = async (
+  e: React.FormEvent<HTMLFormElement>
+) => {
+  e.preventDefault();
+
+  if (!newCategory.trim()) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      "http://localhost:5000/api/categories",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: newCategory.trim(),
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to add category");
+    }
+
+    setNewCategory("");
+
+    await fetchCategories();
+  } catch (error) {
+    console.error("Error adding category:", error);
+  }
+};
+
+const handleDeleteCategory = async (id: number) => {
+  const confirmed = window.confirm(
+    "Are you sure you want to delete this category?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `http://localhost:5000/api/categories/${id}`,
+      {
+        method: "DELETE",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to delete category");
+    }
+
+    await fetchCategories();
+  } catch (error) {
+    console.error("Error deleting category:", error);
+  }
+};
 
   return (
     <div className="space-y-6">
@@ -420,6 +483,59 @@ useEffect(() => {
           </select>
         </div>
       </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+  <div className="mb-4">
+    <h2 className="text-lg font-semibold text-slate-800">
+      Manage Categories
+    </h2>
+
+    <p className="text-sm text-slate-500">
+      Add or remove product categories.
+    </p>
+  </div>
+
+  <form
+    onSubmit={handleAddCategory}
+    className="mb-5 flex flex-col gap-3 sm:flex-row"
+  >
+    <input
+      type="text"
+      value={newCategory}
+      onChange={(e) => setNewCategory(e.target.value)}
+      placeholder="Enter category name"
+      className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 sm:max-w-sm"
+    />
+
+    <button
+      type="submit"
+      className="rounded-lg bg-blue-600 px-5 py-2.5 text-white transition hover:bg-blue-700"
+    >
+      Add Category
+    </button>
+  </form>
+
+  <div className="flex flex-wrap gap-3">
+    {categories.map((category) => (
+      <div
+        key={category.id}
+        className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+      >
+        <span className="text-sm text-slate-700">
+          {category.name}
+        </span>
+
+        <button
+          type="button"
+          onClick={() => handleDeleteCategory(category.id)}
+          className="text-sm font-medium text-red-600 hover:text-red-700"
+        >
+          Delete
+        </button>
+      </div>
+    ))}
+  </div>
+</div>
 
       {/* Products table */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
