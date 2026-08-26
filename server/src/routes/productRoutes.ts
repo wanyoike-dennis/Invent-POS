@@ -3,6 +3,8 @@ import db from "../database/db.js";
 
 const router = express.Router();
 
+
+
 router.get("/", (req, res) => {
   const products = db
     .prepare("SELECT * FROM products ORDER BY id DESC")
@@ -65,7 +67,7 @@ router.delete("/:id", (req, res) => {
 
 router.patch("/:id/stock", (req, res) => {
   const { id } = req.params;
-  const { type, quantity } = req.body;
+  const { type, quantity, reason } = req.body;
 
   const product = db
     .prepare("SELECT * FROM products WHERE id = ?")
@@ -82,9 +84,15 @@ router.patch("/:id/stock", (req, res) => {
 
   const qty = Number(quantity);
 
-  if (!qty || qty <= 0) {
+  if (!Number.isInteger(qty) || qty <= 0) {
     return res.status(400).json({
-      message: "Quantity must be greater than 0",
+      message: "Quantity must be a positive whole number",
+    });
+  }
+
+  if (type !== "in" && type !== "out") {
+    return res.status(400).json({
+      message: "Invalid stock adjustment type",
     });
   }
 
@@ -92,7 +100,9 @@ router.patch("/:id/stock", (req, res) => {
 
   if (type === "in") {
     newStock += qty;
-  } else if (type === "out") {
+  }
+
+  if (type === "out") {
     if (qty > product.stock) {
       return res.status(400).json({
         message: "Not enough stock available",
@@ -100,17 +110,36 @@ router.patch("/:id/stock", (req, res) => {
     }
 
     newStock -= qty;
-  } else {
-    return res.status(400).json({
-      message: "Invalid stock adjustment type",
-    });
   }
 
-  db.prepare(`
+  const updateStock = db.prepare(`
     UPDATE products
     SET stock = ?
     WHERE id = ?
-  `).run(newStock, id);
+  `);
+
+  const addMovement = db.prepare(`
+    INSERT INTO stock_movements (
+      product_id,
+      type,
+      quantity,
+      reason
+    )
+    VALUES (?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction(() => {
+    updateStock.run(newStock, id);
+
+    addMovement.run(
+      id,
+      type,
+      qty,
+      reason?.trim() || null
+    );
+  });
+
+  transaction();
 
   const updatedProduct = db
     .prepare("SELECT * FROM products WHERE id = ?")
@@ -119,5 +148,26 @@ router.patch("/:id/stock", (req, res) => {
   res.json(updatedProduct);
 });
 
+
+router.get("/stock/history", (req, res) => {
+  const movements = db
+    .prepare(`
+      SELECT
+        stock_movements.id,
+        stock_movements.product_id,
+        products.name AS product_name,
+        stock_movements.type,
+        stock_movements.quantity,
+        stock_movements.reason,
+        stock_movements.created_at
+      FROM stock_movements
+      INNER JOIN products
+        ON products.id = stock_movements.product_id
+      ORDER BY stock_movements.id DESC
+    `)
+    .all();
+
+  res.json(movements);
+});
 
 export default router;

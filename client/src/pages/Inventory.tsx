@@ -8,13 +8,45 @@ type Product = {
   stock: number;
 };
 
+type StockMovement = {
+  id: number;
+  product_id: number;
+  product_name: string;
+  type: "in" | "out";
+  quantity: number;
+  reason: string | null;
+  created_at: string;
+};
+
 function Inventory() {
+const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);    
 const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 const [adjustmentType, setAdjustmentType] = useState<"in" | "out">("in");
 const [quantity, setQuantity] = useState("");
 const [reason, setReason] = useState("");  
 const [products, setProducts] = useState<Product[]>([]);
 const [searchTerm, setSearchTerm] = useState("");
+
+
+const fetchStockMovements = async () => {
+  try {
+    const response = await fetch(
+      "http://localhost:5000/api/products/stock/history"
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch stock history");
+    }
+
+    const data = await response.json();
+
+    setStockMovements(data);
+  } catch (error) {
+    console.error("Error loading stock history:", error);
+  }
+};
+
+
 
   const fetchProducts = async () => {
     try {
@@ -36,6 +68,7 @@ const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     fetchProducts();
+     fetchStockMovements();
   }, []);
 
   const getStockStatus = (stock: number) => {
@@ -101,6 +134,7 @@ const [searchTerm, setSearchTerm] = useState("");
     }
 
     await fetchProducts();
+    await fetchStockMovements();
 
     setSelectedProduct(null);
     setQuantity("");
@@ -436,6 +470,112 @@ const [searchTerm, setSearchTerm] = useState("");
         </div>
 
       </div>
+
+      {/*stock movement */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+
+  <div className="border-b border-slate-200 p-5">
+    <h2 className="text-lg font-semibold text-slate-800">
+      Stock Movement History
+    </h2>
+
+    <p className="mt-1 text-sm text-slate-500">
+      Recent stock additions and removals.
+    </p>
+  </div>
+
+  <div className="overflow-x-auto">
+
+    <table className="w-full text-left">
+
+      <thead className="border-b border-slate-200 bg-slate-50">
+        <tr>
+          <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+            Product
+          </th>
+
+          <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+            Type
+          </th>
+
+          <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+            Quantity
+          </th>
+
+          <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+            Reason
+          </th>
+
+          <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+            Date
+          </th>
+        </tr>
+      </thead>
+
+      <tbody className="divide-y divide-slate-200">
+
+        {stockMovements.length > 0 ? (
+          stockMovements.map((movement) => (
+            <tr
+              key={movement.id}
+              className="hover:bg-slate-50"
+            >
+
+              <td className="px-6 py-4 font-medium text-slate-800">
+                {movement.product_name}
+              </td>
+
+              <td className="px-6 py-4">
+
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    movement.type === "in"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {movement.type === "in"
+                    ? "Stock In"
+                    : "Stock Out"}
+                </span>
+
+              </td>
+
+              <td className="px-6 py-4 font-medium text-slate-700">
+                {movement.type === "in" ? "+" : "-"}
+                {movement.quantity}
+              </td>
+
+              <td className="px-6 py-4 text-slate-600">
+                {movement.reason || "No reason provided"}
+              </td>
+
+              <td className="px-6 py-4 text-sm text-slate-500">
+                {new Date(
+                  movement.created_at
+                ).toLocaleString()}
+              </td>
+
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td
+              colSpan={5}
+              className="px-6 py-10 text-center text-slate-500"
+            >
+              No stock movements recorded yet.
+            </td>
+          </tr>
+        )}
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+</div>
 
     </div>
   );
