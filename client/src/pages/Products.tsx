@@ -8,6 +8,11 @@ type Product = {
   stock: number;
 };
 
+type Category = {
+id: number;
+  name: string;
+};
+
 const getStockStatus = (stock: number) => {
   if (stock === 0) {
     return "Out of Stock";
@@ -27,6 +32,7 @@ function Products() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
 
 
   const [newProduct, setNewProduct] = useState({
@@ -35,6 +41,24 @@ function Products() {
     price: "",
     stock: "",
   });
+
+  const fetchCategories = async () => {
+  try {
+    const response = await fetch(
+      "http://localhost:5000/api/categories"
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch categories");
+    }
+
+    const data = await response.json();
+
+    setCategories(data);
+  } catch (error) {
+    console.error("Error loading categories:", error);
+  }
+};
 
   const filteredProducts = products.filter((product) => {
   const matchesSearch =
@@ -183,6 +207,7 @@ const fetchProducts = async () => {
 
 useEffect(() => {
   fetchProducts();
+  fetchCategories();
 }, []);
 
   return (
@@ -283,13 +308,17 @@ useEffect(() => {
                     Select category
                   </option>
 
-                  <option value="Computer Accessories">
-                    Computer Accessories
-                  </option>
+  {categories.map((category) => (
+    <option
+      key={category.id}
+      value={category.name}
+    >
+      {category.name}
+    </option>
+  ))}
+                
 
-                  <option value="Cables">
-                    Cables
-                  </option>
+                 
                 </select>
               </div>
 
@@ -380,13 +409,14 @@ useEffect(() => {
               All Categories
             </option>
 
-            <option value="Computer Accessories">
-              Computer Accessories
-            </option>
-
-            <option value="Cables">
-              Cables
-            </option>
+          {categories.map((category) => (
+    <option
+      key={category.id}
+      value={category.name}
+    >
+      {category.name}
+    </option>
+  ))}
           </select>
         </div>
       </div>

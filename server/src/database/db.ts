@@ -28,5 +28,7 @@ const insertCategory = db.prepare(`
 
 insertCategory.run("Computer Accessories");
 insertCategory.run("Cables");
+insertCategory.run("Monitors");
+insertCategory.run("Storage devices");
 
 export default db;
