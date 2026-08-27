@@ -27,7 +27,8 @@ function Login() {
 
     try {
       const response = await fetch(
-        "http://localhost:5000/api/auth/login",
+        //"https://6f7c-41-90-137-114.ngrok-free.app/api/auth/login",
+        "http://localhost:5000/api/auth/login", 
         {
           method: "POST",
           headers: {

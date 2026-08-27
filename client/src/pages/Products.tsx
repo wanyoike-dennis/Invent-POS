@@ -74,6 +74,19 @@ function Products() {
     return matchesSearch && matchesCategory;
   });
 
+
+
+  const closeForm = () => {
+  setShowForm(false);
+  setEditingProduct(null);
+
+  setNewProduct({
+    name: "",
+    category: "",
+    price: "",
+    stock: "",
+  });
+};
 const handleAddProduct = async (
   e: React.FormEvent<HTMLFormElement>
 ) => {
@@ -103,8 +116,8 @@ const handleAddProduct = async (
         throw new Error("Failed to update product");
       }
     } else {
-      const response = await fetch(
-        "http://localhost:5000/api/products",
+      const response = await apiFetch(
+        "/api/products", 
         {
           method: "POST",
           headers: {
@@ -134,18 +147,6 @@ const handleAddProduct = async (
   } catch (error) {
     console.error("Error saving product:", error);
   }
-};
-
-  const closeForm = () => {
-  setShowForm(false);
-  setEditingProduct(null);
-
-  setNewProduct({
-    name: "",
-    category: "",
-    price: "",
-    stock: "",
-  });
 };
 
 const handleEditProduct = (product: Product) => {

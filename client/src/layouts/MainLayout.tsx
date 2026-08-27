@@ -316,33 +316,106 @@ const handleLogout = () => {
             <div className="hidden h-8 w-px bg-slate-200 sm:block" />
 
             {/* User */}
-            <button
-              type="button"
-              className="flex items-center gap-3 rounded-lg p-1.5 transition hover:bg-slate-50"
-            >
+            <div className="relative">
 
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
-                {initials}
-              </div>
+  <button
+    type="button"
+    onClick={() => setProfileOpen(!profileOpen)}
+    className="flex items-center gap-3 rounded-lg p-1.5 transition hover:bg-slate-50"
+  >
 
-              <div className="hidden text-left sm:block">
+    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
+      {initials}
+    </div>
 
-                <p className="text-sm font-medium text-slate-800">
-                  {user?.name || "User"}
-                </p>
+    <div className="hidden text-left sm:block">
 
-                <p className="text-xs text-slate-500">
-                  {user?.role || "User"}
-                </p>
+      <p className="text-sm font-medium text-slate-800">
+        {user?.name || "User"}
+      </p>
 
-              </div>
+      <p className="text-xs capitalize text-slate-500">
+        {user?.role || "User"}
+      </p>
 
-              <ChevronDown
-                size={16}
-                className="hidden text-slate-400 sm:block"
-              />
+    </div>
 
-            </button>
+    <ChevronDown
+      size={16}
+      className={`hidden text-slate-400 transition-transform sm:block ${
+        profileOpen ? "rotate-180" : ""
+      }`}
+    />
+
+  </button>
+
+  {/* Profile dropdown */}
+  {profileOpen && (
+    <div className="absolute right-0 top-12 z-50 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+
+      {/* User information */}
+      <div className="border-b border-slate-200 p-4">
+
+        <div className="flex items-center gap-3">
+
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 font-semibold text-white">
+            {initials}
+          </div>
+
+          <div className="min-w-0">
+
+            <p className="truncate text-sm font-semibold text-slate-800">
+              {user?.name || "User"}
+            </p>
+
+            <p className="truncate text-xs text-slate-500">
+              {user?.email || ""}
+            </p>
+
+          </div>
+
+        </div>
+
+        <div className="mt-3">
+          <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium capitalize text-blue-700">
+            {user?.role || "User"}
+          </span>
+        </div>
+
+      </div>
+
+      {/* Menu */}
+      <div className="p-2">
+
+        <button
+          type="button"
+          onClick={() => {
+            setProfileOpen(false);
+            navigate("/settings");
+          }}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+        >
+          <Settings size={18} />
+
+          Account Settings
+        </button>
+
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-red-600 transition hover:bg-red-50"
+        >
+          <LogOut size={18} />
+
+          Sign Out
+        </button>
+
+      </div>
+
+    </div>
+  )}
+
+</div>
 
           </div>
 

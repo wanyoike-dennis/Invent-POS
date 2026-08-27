@@ -16,3 +16,25 @@ body {
   min-height: 100vh;
   background: #f8fafc;
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #print-receipt,
+  #print-receipt * {
+    visibility: visible;
+  }
+
+  #print-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+
+  body {
+    background: white;
+  }
+}
