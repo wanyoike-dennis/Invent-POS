@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../services/api";
+
 import {
   LockKeyhole,
   Mail,
@@ -26,9 +28,9 @@ function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         //"https://6f7c-41-90-137-114.ngrok-free.app/api/auth/login",
-        "http://localhost:5000/api/auth/login", 
+        "/api/auth/login", 
         {
           method: "POST",
           headers: {

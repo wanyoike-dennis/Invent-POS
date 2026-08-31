@@ -64,6 +64,51 @@ CREATE TABLE IF NOT EXISTS sale_items (
   FOREIGN KEY (product_id) REFERENCES products(id)
 );
 
+CREATE TABLE IF NOT EXISTS sales_returns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    sale_id INTEGER NOT NULL,
+
+    refund_amount REAL NOT NULL DEFAULT 0,
+
+    reason TEXT NOT NULL,
+
+    returned_by INTEGER NOT NULL,
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (sale_id)
+        REFERENCES sales(id),
+
+    FOREIGN KEY (returned_by)
+        REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS sales_return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    return_id INTEGER NOT NULL,
+
+    sale_item_id INTEGER NOT NULL,
+
+    product_id INTEGER NOT NULL,
+
+    quantity INTEGER NOT NULL,
+
+    unit_price REAL NOT NULL,
+
+    subtotal REAL NOT NULL,
+
+    FOREIGN KEY (return_id)
+        REFERENCES sales_returns(id),
+
+    FOREIGN KEY (sale_item_id)
+        REFERENCES sale_items(id),
+
+    FOREIGN KEY (product_id)
+        REFERENCES products(id)
+);
+
 `);
 
 const insertCategory = db.prepare(`
