@@ -40,6 +40,48 @@ type SaleItem = {
   quantity: number;
   unit_price: number;
   subtotal: number;
+  returned_quantity: number;
+  returnable_quantity: number;
+};
+
+type SaleReturnItem = {
+  id: number;
+  return_id: number;
+  sale_item_id: number;
+  product_id: number;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+};
+
+type SaleReturn = {
+  id: number;
+  sale_id: number;
+  refund_amount: number;
+  reason: string;
+  returned_by: number;
+  returned_by_name: string | null;
+  created_at: string;
+  items: SaleReturnItem[];
+};
+
+type SaleSummary = {
+  original_total: number;
+  total_refunded: number;
+  net_total: number;
+};
+
+type ReturnHistoryRecord = {
+  id: number;
+  sale_id: number;
+  refund_amount: number;
+  reason: string;
+  returned_by: number;
+  returned_by_name: string | null;
+  created_at: string;
+  receipt_number: string;
+  payment_method: string;
 };
 
 function Sales() {
@@ -49,7 +91,7 @@ function Sales() {
   const [loading, setLoading] = useState(true);
 
   const [activeTab, setActiveTab] =
-    useState<"sale" | "history">("sale");
+    useState<"sale" | "history" | "returns">("sale");
 
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] =
@@ -62,12 +104,24 @@ function Sales() {
 
   const [salesHistory, setSalesHistory] = useState<Sale[]>([]);
 
+  const [returnsHistory, setReturnsHistory] = useState<ReturnHistoryRecord[]>([]);
+  const [returnHistorySearch, setReturnHistorySearch] = useState("");
+  const [returnHistoryDate, setReturnHistoryDate] = useState("");
+
   const [selectedSale, setSelectedSale] = useState<{
     sale: Sale;
     items: SaleItem[];
+    returns: SaleReturn[];
+    summary: SaleSummary;
   } | null>(null);
 
   const [loadingReceipt, setLoadingReceipt] = useState(false);
+
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnQuantities, setReturnQuantities] = useState<Record<number, number>>({});
+  const [returnReason, setReturnReason] = useState("");
+  const [returnError, setReturnError] = useState("");
+  const [processingReturn, setProcessingReturn] = useState(false);
 
   const [historySearch, setHistorySearch] = useState("");
   const [paymentFilter, setPaymentFilter] =
@@ -108,9 +162,25 @@ function Sales() {
     }
   };
 
+  const fetchReturnsHistory = async () => {
+    try {
+      const response = await apiFetch("/api/sales/returns/history");
+
+      if (!response.ok) {
+        throw new Error("Failed to load returns history");
+      }
+
+      const data = await response.json();
+      setReturnsHistory(data);
+    } catch (error) {
+      console.error("Error loading returns history:", error);
+    }
+  };
+
   useEffect(() => {
     fetchProducts();
     fetchSalesHistory();
+    fetchReturnsHistory();
   }, []);
 
   const viewSaleDetails = async (id: number) => {
@@ -134,6 +204,103 @@ function Sales() {
 
   const handlePrintReceipt = () => {
     window.print();
+  };
+
+  const openReturnModal = () => {
+    if (!selectedSale) return;
+
+    const quantities: Record<number, number> = {};
+    selectedSale.items.forEach((item) => {
+      quantities[item.id] = 0;
+    });
+
+    setReturnQuantities(quantities);
+    setReturnReason("");
+    setReturnError("");
+    setShowReturnModal(true);
+  };
+
+  const changeReturnQuantity = (item: SaleItem, change: number) => {
+    setReturnQuantities((current) => {
+      const currentQuantity = current[item.id] || 0;
+      const nextQuantity = Math.min(
+        Math.max(currentQuantity + change, 0),
+        item.returnable_quantity
+      );
+
+      return {
+        ...current,
+        [item.id]: nextQuantity,
+      };
+    });
+  };
+
+  const returnRefundTotal = selectedSale
+    ? selectedSale.items.reduce(
+        (sum, item) =>
+          sum + (returnQuantities[item.id] || 0) * Number(item.unit_price),
+        0
+      )
+    : 0;
+
+  const handleProcessReturn = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!selectedSale) return;
+
+    setReturnError("");
+
+    const items = selectedSale.items
+      .map((item) => ({
+        saleItemId: item.id,
+        quantity: returnQuantities[item.id] || 0,
+      }))
+      .filter((item) => item.quantity > 0);
+
+    if (items.length === 0) {
+      setReturnError("Select at least one item to return.");
+      return;
+    }
+
+    if (!returnReason.trim()) {
+      setReturnError("Return reason is required.");
+      return;
+    }
+
+    try {
+      setProcessingReturn(true);
+
+      const saleId = selectedSale.sale.id;
+      const response = await apiFetch(`/api/sales/${saleId}/return`, {
+        method: "POST",
+        body: JSON.stringify({
+          items,
+          reason: returnReason.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setReturnError(data.message || "Failed to process return.");
+        return;
+      }
+
+      setShowReturnModal(false);
+      setReturnQuantities({});
+      setReturnReason("");
+      setReturnError("");
+
+      await fetchProducts();
+      await fetchSalesHistory();
+      await fetchReturnsHistory();
+      await viewSaleDetails(saleId);
+    } catch (error) {
+      console.error("Error processing return:", error);
+      setReturnError("Could not process the return.");
+    } finally {
+      setProcessingReturn(false);
+    }
   };
 
   const filteredProducts = useMemo(() => {
@@ -239,6 +406,59 @@ function Sales() {
       mpesaSales,
     };
   }, [salesHistory]);
+
+  const filteredReturns = useMemo(() => {
+    return returnsHistory.filter((record) => {
+      const search = returnHistorySearch.trim().toLowerCase();
+
+      const matchesSearch =
+        record.receipt_number.toLowerCase().includes(search) ||
+        record.reason.toLowerCase().includes(search) ||
+        (record.returned_by_name || "").toLowerCase().includes(search);
+
+      let matchesDate = true;
+
+      if (returnHistoryDate) {
+        const returnDate = new Date(record.created_at);
+        const year = returnDate.getFullYear();
+        const month = String(returnDate.getMonth() + 1).padStart(2, "0");
+        const day = String(returnDate.getDate()).padStart(2, "0");
+        matchesDate = `${year}-${month}-${day}` === returnHistoryDate;
+      }
+
+      return matchesSearch && matchesDate;
+    });
+  }, [returnsHistory, returnHistorySearch, returnHistoryDate]);
+
+  const returnsSummary = useMemo(() => {
+    const now = new Date();
+
+    const isToday = (value: string) => {
+      const date = new Date(value);
+      return (
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate()
+      );
+    };
+
+    const todayReturns = returnsHistory.filter((record) =>
+      isToday(record.created_at)
+    );
+
+    return {
+      totalReturns: returnsHistory.length,
+      totalRefunded: returnsHistory.reduce(
+        (sum, record) => sum + Number(record.refund_amount),
+        0
+      ),
+      returnsToday: todayReturns.length,
+      refundedToday: todayReturns.reduce(
+        (sum, record) => sum + Number(record.refund_amount),
+        0
+      ),
+    };
+  }, [returnsHistory]);
 
   const addToCart = (product: Product) => {
     if (product.stock <= 0) {
@@ -586,7 +806,12 @@ function Sales() {
                           </td>
 
                           <td className="px-4 py-3 text-center text-sm text-slate-600">
-                            {item.quantity}
+                            <div>{item.quantity}</div>
+                            {item.returned_quantity > 0 && (
+                              <div className="mt-1 text-xs font-medium text-orange-600 print:text-black">
+                                {item.returned_quantity} returned
+                              </div>
+                            )}
                           </td>
 
                           <td className="px-4 py-3 text-right text-sm text-slate-600">
@@ -613,46 +838,129 @@ function Sales() {
               <div className="space-y-2 border-t border-slate-200 pt-4">
 
                 <div className="flex justify-between text-sm text-slate-600">
+                  <span>Amount Paid</span>
                   <span>
-                    Amount Paid
-                  </span>
-
-                  <span>
-                    KES{" "}
-                    {selectedSale.sale.amount_paid.toLocaleString()}
+                    KES {Number(selectedSale.sale.amount_paid).toLocaleString()}
                   </span>
                 </div>
 
-                {selectedSale.sale.payment_method ===
-                  "Cash" && (
+                {selectedSale.sale.payment_method === "Cash" && (
                   <div className="flex justify-between text-sm text-slate-600">
-
+                    <span>Change</span>
                     <span>
-                      Change
+                      KES {Number(selectedSale.sale.change_amount).toLocaleString()}
                     </span>
-
-                    <span>
-                      KES{" "}
-                      {selectedSale.sale.change_amount.toLocaleString()}
-                    </span>
-
                   </div>
                 )}
 
-                <div className="flex justify-between border-t border-slate-200 pt-3 text-xl font-bold text-slate-900">
+                {selectedSale.summary.total_refunded > 0 ? (
+                  <>
+                    <div className="flex justify-between border-t border-slate-200 pt-3 text-sm text-slate-600">
+                      <span>Original Total</span>
+                      <span>
+                        KES {selectedSale.summary.original_total.toLocaleString()}
+                      </span>
+                    </div>
 
-                  <span>
-                    Total
-                  </span>
+                    <div className="flex justify-between text-sm font-medium text-orange-600 print:text-black">
+                      <span>Total Refunded</span>
+                      <span>
+                        - KES {selectedSale.summary.total_refunded.toLocaleString()}
+                      </span>
+                    </div>
 
-                  <span>
-                    KES{" "}
-                    {selectedSale.sale.total.toLocaleString()}
-                  </span>
-
-                </div>
+                    <div className="flex justify-between border-t border-slate-200 pt-3 text-xl font-bold text-slate-900">
+                      <span>Net Sale</span>
+                      <span>
+                        KES {selectedSale.summary.net_total.toLocaleString()}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between border-t border-slate-200 pt-3 text-xl font-bold text-slate-900">
+                    <span>Total</span>
+                    <span>
+                      KES {Number(selectedSale.sale.total).toLocaleString()}
+                    </span>
+                  </div>
+                )}
 
               </div>
+
+              {selectedSale.returns.length > 0 && (
+                <div className="space-y-4 border-t border-slate-200 pt-5">
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-slate-800">
+                      Return History
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Refunds processed against this receipt.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {selectedSale.returns.map((saleReturn) => (
+                      <div
+                        key={saleReturn.id}
+                        className="rounded-xl border border-orange-200 bg-orange-50/60 p-4 print:border-slate-300 print:bg-white"
+                      >
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="font-semibold text-slate-800">
+                              Return #{saleReturn.id}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {new Date(saleReturn.created_at).toLocaleString()}
+                            </p>
+                          </div>
+
+                          <p className="font-bold text-orange-700 print:text-black">
+                            Refund: KES {saleReturn.refund_amount.toLocaleString()}
+                          </p>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                          <div>
+                            <span className="text-slate-500">Reason: </span>
+                            <span className="font-medium text-slate-700">
+                              {saleReturn.reason}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500">Processed by: </span>
+                            <span className="font-medium text-slate-700">
+                              {saleReturn.returned_by_name || "Unknown"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 overflow-hidden rounded-lg border border-orange-100 bg-white print:border-slate-200">
+                          {saleReturn.items.map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-sm last:border-b-0"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate font-medium text-slate-700">
+                                  {item.product_name}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {item.quantity} × KES {item.unit_price.toLocaleString()}
+                                </p>
+                              </div>
+
+                              <p className="whitespace-nowrap font-semibold text-slate-800">
+                                KES {item.subtotal.toLocaleString()}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="border-t border-dashed border-slate-300 pt-5 text-center">
 
@@ -666,7 +974,7 @@ function Sales() {
 
               </div>
 
-              <div className="flex gap-3 pt-2 print:hidden">
+              <div className="grid grid-cols-1 gap-3 pt-2 print:hidden sm:grid-cols-3">
 
                 <button
                   type="button"
@@ -676,6 +984,17 @@ function Sales() {
                   className="flex-1 rounded-lg border border-slate-300 px-4 py-3 font-medium text-slate-700 hover:bg-slate-50"
                 >
                   Close
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openReturnModal}
+                  disabled={!selectedSale.items.some((item) => item.returnable_quantity > 0)}
+                  className="flex-1 rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {selectedSale.items.some((item) => item.returnable_quantity > 0)
+                    ? "Return Items"
+                    : "Fully Returned"}
                 </button>
 
                 <button
@@ -694,6 +1013,151 @@ function Sales() {
 
           </div>
 
+        </div>
+      )}
+
+      {/* RETURN / REFUND MODAL */}
+      {showReturnModal && selectedSale && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 p-5">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-800">Return Items</h2>
+                <p className="text-sm text-slate-500">
+                  {selectedSale.sale.receipt_number}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!processingReturn) {
+                    setShowReturnModal(false);
+                    setReturnError("");
+                  }
+                }}
+                className="text-2xl text-slate-400 hover:text-slate-700"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleProcessReturn} className="space-y-5 p-5">
+              {returnError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {returnError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {selectedSale.items.map((item) => {
+                  const quantity = returnQuantities[item.id] || 0;
+                  const fullyReturned = item.returnable_quantity <= 0;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`rounded-xl border p-4 ${
+                        fullyReturned
+                          ? "border-slate-200 bg-slate-50 opacity-70"
+                          : "border-slate-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-slate-800">{item.product_name}</p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            KES {Number(item.unit_price).toLocaleString()} each
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Sold: {item.quantity} · Returned: {item.returned_quantity} · Returnable: {item.returnable_quantity}
+                          </p>
+                        </div>
+
+                        {fullyReturned ? (
+                          <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">
+                            Fully returned
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => changeReturnQuantity(item, -1)}
+                              disabled={quantity <= 0 || processingReturn}
+                              className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Minus size={16} />
+                            </button>
+
+                            <span className="min-w-8 text-center font-semibold text-slate-800">
+                              {quantity}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => changeReturnQuantity(item, 1)}
+                              disabled={quantity >= item.returnable_quantity || processingReturn}
+                              className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Return Reason
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  placeholder="e.g. Defective item, wrong item, customer return..."
+                  className="w-full resize-none rounded-lg border border-slate-300 px-4 py-3 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                />
+              </div>
+
+              <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-medium text-orange-800">Refund Amount</span>
+                  <span className="text-2xl font-bold text-orange-700">
+                    KES {returnRefundTotal.toLocaleString()}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-orange-700">
+                  Returned quantities will be added back to inventory.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  disabled={processingReturn}
+                  onClick={() => {
+                    setShowReturnModal(false);
+                    setReturnError("");
+                  }}
+                  className="flex-1 rounded-lg border border-slate-300 px-4 py-3 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={processingReturn || returnRefundTotal <= 0}
+                  className="flex-1 rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {processingReturn ? "Processing..." : "Confirm Return"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -926,6 +1390,21 @@ function Sales() {
           }`}
         >
           Sales History
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("returns");
+            fetchReturnsHistory();
+          }}
+          className={`border-b-2 px-4 py-3 text-sm font-medium transition ${
+            activeTab === "returns"
+              ? "border-orange-600 text-orange-600"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          Returns History
         </button>
 
       </div>
@@ -1495,6 +1974,117 @@ function Sales() {
 
           </div>
 
+        </div>
+      )}
+
+      {/* RETURNS HISTORY TAB */}
+      {activeTab === "returns" && (
+        <div className="space-y-5">
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-slate-500">Total Returns</p>
+              <p className="mt-2 text-2xl font-bold text-slate-800">{returnsSummary.totalReturns}</p>
+              <p className="mt-1 text-xs text-slate-400">All return transactions</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-slate-500">Total Refunded</p>
+              <p className="mt-2 text-2xl font-bold text-orange-600">KES {returnsSummary.totalRefunded.toLocaleString()}</p>
+              <p className="mt-1 text-xs text-slate-400">Refund value across all returns</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-slate-500">Returns Today</p>
+              <p className="mt-2 text-2xl font-bold text-slate-800">{returnsSummary.returnsToday}</p>
+              <p className="mt-1 text-xs text-slate-400">Return transactions today</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-slate-500">Refunded Today</p>
+              <p className="mt-2 text-2xl font-bold text-orange-600">KES {returnsSummary.refundedToday.toLocaleString()}</p>
+              <p className="mt-1 text-xs text-slate-400">Refund value processed today</p>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-5">
+              <h2 className="text-lg font-semibold text-slate-800">Returns History</h2>
+              <p className="mt-1 text-sm text-slate-500">Review all product returns and refunds.</p>
+              <p className="mt-2 text-xs font-medium text-slate-400">Showing {filteredReturns.length} of {returnsHistory.length} returns</p>
+            </div>
+
+            <div className="border-b border-slate-200 p-5">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_190px_auto]">
+                <div className="relative">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={returnHistorySearch}
+                    onChange={(e) => setReturnHistorySearch(e.target.value)}
+                    placeholder="Search receipt, reason or staff..."
+                    className="w-full rounded-lg border border-slate-300 py-2.5 pl-10 pr-4 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                  />
+                </div>
+                <input
+                  type="date"
+                  value={returnHistoryDate}
+                  onChange={(e) => setReturnHistoryDate(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-700 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setReturnHistorySearch(""); setReturnHistoryDate(""); }}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="border-b border-slate-200 bg-slate-50">
+                  <tr>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Return</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Receipt</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Refund</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Reason</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Processed By</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Date</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {filteredReturns.length > 0 ? (
+                    filteredReturns.map((record) => (
+                      <tr key={record.id} className="transition hover:bg-slate-50">
+                        <td className="px-6 py-4 font-medium text-slate-800">#{record.id}</td>
+                        <td className="whitespace-nowrap px-6 py-4 font-medium text-slate-700">{record.receipt_number}</td>
+                        <td className="whitespace-nowrap px-6 py-4 font-semibold text-orange-600">KES {record.refund_amount.toLocaleString()}</td>
+                        <td className="max-w-xs px-6 py-4 text-sm text-slate-600">{record.reason}</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-slate-600">{record.returned_by_name || "Unknown"}</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500">{new Date(record.created_at).toLocaleString()}</td>
+                        <td className="px-6 py-4">
+                          <button
+                            type="button"
+                            disabled={loadingReceipt}
+                            onClick={() => viewSaleDetails(record.sale_id)}
+                            className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            View Receipt
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
+                        {returnsHistory.length === 0 ? "No returns recorded yet." : "No returns match your filters."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
