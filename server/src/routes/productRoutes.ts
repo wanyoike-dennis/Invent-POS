@@ -1,34 +1,77 @@
 import express from "express";
 import db from "../database/db.js";
 import { authorizeRoles } from "../middleware/authMiddleware.js";
+import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
 
 
-router.get("/", (req, res) => {
-  const products = db
-    .prepare("SELECT * FROM products ORDER BY id DESC")
-    .all();
+router.get("/", (req: AuthRequest, res) => {
+  const isCashier = req.user?.role === "cashier";
+
+  const products = isCashier
+    ? db
+        .prepare(`
+          SELECT
+            id,
+            name,
+            category,
+            price,
+            stock,
+            created_at
+          FROM products
+          ORDER BY id DESC
+        `)
+        .all()
+    : db
+        .prepare(`
+          SELECT *
+          FROM products
+          ORDER BY id DESC
+        `)
+        .all();
 
   res.json(products);
 });
 
 router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
-  const { name, category, price, stock } = req.body;
+  const { name, category, cost_price, price, stock } = req.body;
 
-  if (!name || !category || price === undefined || stock === undefined) {
+  if (!name || !category || cost_price === undefined || price === undefined || stock === undefined) {
     return res.status(400).json({
       message: "All product fields are required",
     });
   }
 
+  const costPrice = Number(cost_price);
+  const sellingPrice = Number(price);
+  const stockQuantity = Number(stock);
+
+  if (!Number.isFinite(costPrice) || costPrice < 0) {
+    return res.status(400).json({
+      message: "Cost price must be a valid non-negative number",
+    });
+  }
+
+  if (!Number.isFinite(sellingPrice) || sellingPrice < 0) {
+    return res.status(400).json({
+      message: "Selling price must be a valid non-negative number",
+    });
+  }
+
+  if (!Number.isInteger(stockQuantity) || stockQuantity < 0) {
+    return res.status(400).json({
+      message: "Stock must be a non-negative whole number",
+    });
+  }
+
   const result = db
     .prepare(`
-      INSERT INTO products (name, category, price, stock)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO products (name, category, cost_price, price, stock)
+      VALUES (?, ?, ?, ?, ?)
     `)
-    .run(name, category, price, stock);
+    .run(name, category, costPrice, sellingPrice, stockQuantity);
 
   const product = db
     .prepare("SELECT * FROM products WHERE id = ?")
@@ -39,13 +82,51 @@ router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
 
 router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
   const { id } = req.params;
-  const { name, category, price, stock } = req.body;
+  const { name, category, cost_price, price, stock } = req.body;
+
+  if (!name || !category || cost_price === undefined || price === undefined || stock === undefined) {
+    return res.status(400).json({
+      message: "All product fields are required",
+    });
+  }
+
+  const costPrice = Number(cost_price);
+  const sellingPrice = Number(price);
+  const stockQuantity = Number(stock);
+
+  if (!Number.isFinite(costPrice) || costPrice < 0) {
+    return res.status(400).json({
+      message: "Cost price must be a valid non-negative number",
+    });
+  }
+
+  if (!Number.isFinite(sellingPrice) || sellingPrice < 0) {
+    return res.status(400).json({
+      message: "Selling price must be a valid non-negative number",
+    });
+  }
+
+  if (!Number.isInteger(stockQuantity) || stockQuantity < 0) {
+    return res.status(400).json({
+      message: "Stock must be a non-negative whole number",
+    });
+  }
+
+  const existingProduct = db
+    .prepare("SELECT id FROM products WHERE id = ?")
+    .get(id);
+
+  if (!existingProduct) {
+    return res.status(404).json({
+      message: "Product not found",
+    });
+  }
 
   db.prepare(`
     UPDATE products
-    SET name = ?, category = ?, price = ?, stock = ?
+    SET name = ?, category = ?, cost_price = ?, price = ?, stock = ?
     WHERE id = ?
-  `).run(name, category, price, stock, id);
+  `).run(name, category, costPrice, sellingPrice, stockQuantity, id);
 
   const product = db
     .prepare("SELECT * FROM products WHERE id = ?")

@@ -31,7 +31,7 @@ app.get("/", (req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/products",authenticateToken,productRoutes);
-app.use( "/api/categories",authenticateToken,authorizeRoles("admin", "manager"),categoryRoutes);
+app.use( "/api/categories",authenticateToken,categoryRoutes);
 app.use( "/api/sales", authenticateToken, authorizeRoles("admin", "manager", "cashier"),saleRoutes);
 app.use("/api/dashboard", authenticateToken, authorizeRoles("admin", "manager", "cashier"), dashboardRoutes);
 app.use("/api/reports",authenticateToken,authorizeRoles("admin", "manager"),reportRoutes);

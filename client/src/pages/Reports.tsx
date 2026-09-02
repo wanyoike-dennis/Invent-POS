@@ -20,6 +20,10 @@ type ReportData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    original_cogs: number;
+    returned_cogs: number;
+    net_cogs: number;
+    gross_profit: number;
     expenses: number;
     net_profit: number;
     transactions: number;
@@ -42,6 +46,10 @@ type ReportData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    original_cogs: number;
+    returned_cogs: number;
+    net_cogs: number;
+    gross_profit: number;
     expenses: number;
     net_profit: number;
   }[];
@@ -374,7 +382,7 @@ function Reports() {
               </h2>
 
               <p className="mt-2 text-sm text-slate-500">
-                Net sales less expenses
+                Gross profit less expenses
               </p>
             </div>
 
@@ -547,62 +555,96 @@ function Reports() {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-800">
-                  Profit Calculation
-                </h2>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800">
+                Profit Calculation
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Net Sales - Net COGS = Gross Profit; Gross Profit - Expenses = Net Profit
+              </p>
+            </div>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  Net Sales - Expenses = Net Profit
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <div className="rounded-lg bg-green-50 px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-green-700">
+                  Net Sales
+                </p>
+                <p className="mt-1 font-bold text-green-700">
+                  {formatCurrency(reportData.summary.net_sales)}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <div className="rounded-lg bg-green-50 px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-green-700">
-                    Net Sales
-                  </p>
-                  <p className="mt-1 font-bold text-green-700">
-                    {formatCurrency(reportData.summary.net_sales)}
-                  </p>
-                </div>
+              <div className="rounded-lg bg-slate-50 px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-600">
+                  Net COGS
+                </p>
+                <p className="mt-1 font-bold text-slate-800">
+                  {formatCurrency(reportData.summary.net_cogs)}
+                </p>
+              </div>
 
-                <div className="rounded-lg bg-amber-50 px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-wide text-amber-700">
-                    Expenses
-                  </p>
-                  <p className="mt-1 font-bold text-amber-700">
-                    {formatCurrency(reportData.summary.expenses)}
-                  </p>
-                </div>
+              <div className="rounded-lg bg-blue-50 px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-blue-700">
+                  Gross Profit
+                </p>
+                <p className="mt-1 font-bold text-blue-700">
+                  {formatCurrency(reportData.summary.gross_profit)}
+                </p>
+              </div>
 
-                <div
-                  className={`rounded-lg px-4 py-3 ${
+              <div className="rounded-lg bg-amber-50 px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-amber-700">
+                  Expenses
+                </p>
+                <p className="mt-1 font-bold text-amber-700">
+                  {formatCurrency(reportData.summary.expenses)}
+                </p>
+              </div>
+
+              <div
+                className={`rounded-lg px-4 py-3 ${
+                  reportData.summary.net_profit >= 0
+                    ? "bg-emerald-50"
+                    : "bg-red-50"
+                }`}
+              >
+                <p
+                  className={`text-xs font-medium uppercase tracking-wide ${
                     reportData.summary.net_profit >= 0
-                      ? "bg-emerald-50"
-                      : "bg-red-50"
+                      ? "text-emerald-700"
+                      : "text-red-700"
                   }`}
                 >
-                  <p
-                    className={`text-xs font-medium uppercase tracking-wide ${
-                      reportData.summary.net_profit >= 0
-                        ? "text-emerald-700"
-                        : "text-red-700"
-                    }`}
-                  >
-                    Net Profit
-                  </p>
-                  <p
-                    className={`mt-1 font-bold ${
-                      reportData.summary.net_profit >= 0
-                        ? "text-emerald-700"
-                        : "text-red-700"
-                    }`}
-                  >
-                    {formatCurrency(reportData.summary.net_profit)}
-                  </p>
-                </div>
+                  Net Profit
+                </p>
+                <p
+                  className={`mt-1 font-bold ${
+                    reportData.summary.net_profit >= 0
+                      ? "text-emerald-700"
+                      : "text-red-700"
+                  }`}
+                >
+                  {formatCurrency(reportData.summary.net_profit)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  Original COGS
+                </p>
+                <p className="mt-1 font-semibold text-slate-700">
+                  {formatCurrency(reportData.summary.original_cogs)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  Returned COGS
+                </p>
+                <p className="mt-1 font-semibold text-slate-700">
+                  {formatCurrency(reportData.summary.returned_cogs)}
+                </p>
               </div>
             </div>
           </div>
@@ -613,7 +655,7 @@ function Reports() {
                 Daily Sales Trend
               </h2>
               <p className="text-sm text-slate-500">
-                Gross sales, refunds, net sales, expenses, and profit for the selected period.
+                Gross sales, refunds, net sales, COGS, gross profit, expenses, and net profit for the selected period.
               </p>
             </div>
 
@@ -661,6 +703,22 @@ function Reports() {
 
                     <Line
                       type="monotone"
+                      dataKey="net_cogs"
+                      name="Net COGS"
+                      stroke="#64748b"
+                      strokeWidth={2}
+                    />
+
+                    <Line
+                      type="monotone"
+                      dataKey="gross_profit"
+                      name="Gross Profit"
+                      stroke="#0284c7"
+                      strokeWidth={2}
+                    />
+
+                    <Line
+                      type="monotone"
                       dataKey="expenses"
                       name="Expenses"
                       stroke="#d97706"
@@ -693,7 +751,7 @@ function Reports() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[950px]">
+                <table className="w-full min-w-[1200px]">
                   <thead className="bg-slate-50">
                     <tr>
                       <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -707,6 +765,12 @@ function Reports() {
                       </th>
                       <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Net Sales
+                      </th>
+                      <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Net COGS
+                      </th>
+                      <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Gross Profit
                       </th>
                       <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Expenses
@@ -736,6 +800,14 @@ function Reports() {
 
                         <td className="px-5 py-4 text-right text-sm font-semibold text-slate-800">
                           {formatCurrency(row.net_sales)}
+                        </td>
+
+                        <td className="px-5 py-4 text-right text-sm text-slate-600">
+                          {formatCurrency(row.net_cogs)}
+                        </td>
+
+                        <td className="px-5 py-4 text-right text-sm font-semibold text-blue-700">
+                          {formatCurrency(row.gross_profit)}
                         </td>
 
                         <td className="px-5 py-4 text-right text-sm text-amber-700">

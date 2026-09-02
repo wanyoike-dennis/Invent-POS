@@ -1,6 +1,7 @@
 import express from "express";
 import db from "../database/db.js";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
+import { authorizeRoles } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ type SaleItemInput = {
 // Refund-aware sales history
 // ============================================================
 
-router.get("/", (req, res) => {
+router.get("/", (req: AuthRequest, res) => {
   try {
     const sales = db
       .prepare(`
@@ -36,9 +37,19 @@ router.get("/", (req, res) => {
         LEFT JOIN users
           ON users.id = sales.sold_by
 
+        ${
+          req.user?.role === "cashier"
+            ? "WHERE sales.sold_by = ?"
+            : ""
+        }
+
         ORDER BY sales.id DESC
       `)
-      .all()
+      .all(
+        ...(req.user?.role === "cashier"
+          ? [req.user.id]
+          : [])
+      )
       .map((sale: any) => {
         const originalTotal = Number(sale.total);
 
@@ -162,6 +173,7 @@ router.post("/", (req: AuthRequest, res) => {
               id,
               name,
               price,
+              cost_price,
               stock
             FROM products
             WHERE id = ?
@@ -171,6 +183,7 @@ router.post("/", (req: AuthRequest, res) => {
               id: number;
               name: string;
               price: number;
+              cost_price: number;
               stock: number;
             }
           | undefined;
@@ -280,9 +293,10 @@ router.post("/", (req: AuthRequest, res) => {
           product_name,
           quantity,
           unit_price,
+          cost_price,
           subtotal
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
       // Reduce stock
@@ -310,6 +324,7 @@ router.post("/", (req: AuthRequest, res) => {
           item.name,
           item.quantity,
           item.price,
+          Number(item.cost_price || 0),
           item.subtotal
         );
 
@@ -358,7 +373,7 @@ router.post("/", (req: AuthRequest, res) => {
 // GET RETURNS HISTORY
 // ============================================================
 
-router.get("/returns/history", (req, res) => {
+router.get("/returns/history", authorizeRoles("admin", "manager"), (req, res) => {
   try {
     const returns = db
       .prepare(`
@@ -410,7 +425,7 @@ router.get("/returns/history", (req, res) => {
 // Receipt + returned quantities + return history + refund summary
 // ============================================================
 
-router.get("/:id", (req, res) => {
+router.get("/:id", (req: AuthRequest, res) => {
   try {
     const saleId = Number(req.params.id);
 
@@ -429,8 +444,18 @@ router.get("/:id", (req, res) => {
         LEFT JOIN users
           ON users.id = sales.sold_by
         WHERE sales.id = ?
+          ${
+            req.user?.role === "cashier"
+              ? "AND sales.sold_by = ?"
+              : ""
+          }
       `)
-      .get(saleId);
+      .get(
+        saleId,
+        ...(req.user?.role === "cashier"
+          ? [req.user.id]
+          : [])
+      );
 
     if (!sale) {
       return res.status(404).json({
@@ -571,6 +596,7 @@ router.get("/:id", (req, res) => {
 
 router.post(
   "/:id/return",
+  authorizeRoles("admin", "manager"),
   (req: AuthRequest, res) => {
     try {
       const saleId = Number(req.params.id);

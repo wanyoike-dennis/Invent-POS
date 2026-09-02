@@ -5,6 +5,7 @@ type Product = {
   id: number;
   name: string;
   category: string;
+  cost_price: number;
   price: number;
   stock: number;
 };
@@ -28,6 +29,26 @@ const getStockStatus = (stock: number) => {
 
 
 function Products() {
+  const storedUser = localStorage.getItem("user");
+
+  let userRole = "";
+
+  try {
+    const user = storedUser ? JSON.parse(storedUser) : null;
+    userRole = String(user?.role || "").toLowerCase();
+  } catch {
+    userRole = "";
+  }
+
+  const canManageProducts =
+    userRole === "admin" || userRole === "manager";
+
+  const canDeleteProducts =
+    userRole === "admin";
+
+  const canManageCategories =
+    userRole === "admin" || userRole === "manager";
+
   const [newCategory, setNewCategory] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -40,6 +61,7 @@ function Products() {
   const [newProduct, setNewProduct] = useState({
     name: "",
     category: "",
+    cost_price: "",
     price: "",
     stock: "",
   });
@@ -83,6 +105,7 @@ function Products() {
   setNewProduct({
     name: "",
     category: "",
+    cost_price: "",
     price: "",
     stock: "",
   });
@@ -92,9 +115,14 @@ const handleAddProduct = async (
 ) => {
   e.preventDefault();
 
+  if (!canManageProducts) {
+    return;
+  }
+
   const productData = {
     name: newProduct.name.trim(),
     category: newProduct.category,
+    cost_price: Number(newProduct.cost_price),
     price: Number(newProduct.price),
     stock: Number(newProduct.stock),
   };
@@ -150,11 +178,16 @@ const handleAddProduct = async (
 };
 
 const handleEditProduct = (product: Product) => {
+  if (!canManageProducts) {
+    return;
+  }
+
   setEditingProduct(product);
 
   setNewProduct({
     name: product.name,
     category: product.category,
+    cost_price: product.cost_price.toString(),
     price: product.price.toString(),
     stock: product.stock.toString(),
   });
@@ -163,6 +196,10 @@ const handleEditProduct = (product: Product) => {
 };
 
 const handleDeleteProduct = async (id: number) => {
+  if (!canDeleteProducts) {
+    return;
+  }
+
   const confirmed = window.confirm(
     "Are you sure you want to delete this product?"
   );
@@ -218,6 +255,10 @@ const handleAddCategory = async (
 ) => {
   e.preventDefault();
 
+  if (!canManageCategories) {
+    return;
+  }
+
   if (!newCategory.trim()) {
     return;
   }
@@ -249,6 +290,10 @@ const handleAddCategory = async (
 };
 
 const handleDeleteCategory = async (id: number) => {
+  if (!canManageCategories) {
+    return;
+  }
+
   const confirmed = window.confirm(
     "Are you sure you want to delete this category?"
   );
@@ -289,28 +334,30 @@ const handleDeleteCategory = async (id: number) => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-  setEditingProduct(null);
+        {canManageProducts && (
+          <button
+            type="button"
+            onClick={() => {
+              setEditingProduct(null);
 
-  setNewProduct({
-    name: "",
-    category: "",
-    price: "",
-    stock: "",
-  });
+              setNewProduct({
+                name: "",
+                category: "",
+                price: "",
+                stock: "",
+              });
 
-  setShowForm(true);
-}}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-white transition hover:bg-blue-700"
-        >
-          + Add Product
-        </button>
+              setShowForm(true);
+            }}
+            className="rounded-lg bg-blue-600 px-5 py-2.5 text-white transition hover:bg-blue-700"
+          >
+            + Add Product
+          </button>
+        )}
       </div>
 
       {/* Add Product Modal */}
-      {showForm && (
+      {showForm && canManageProducts && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-lg rounded-xl bg-white shadow-lg">
             <div className="flex items-center justify-between border-b border-slate-200 p-5">
@@ -387,7 +434,30 @@ const handleDeleteCategory = async (id: number) => {
                 </select>
               </div>
 
-              {/* Price */}
+              {/* Cost price */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Cost Price / Buying Price
+                </label>
+
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="0.01"
+                  value={newProduct.cost_price}
+                  onChange={(e) =>
+                    setNewProduct({
+                      ...newProduct,
+                      cost_price: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. 1800"
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Selling price */}
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
                   Selling Price
@@ -486,7 +556,8 @@ const handleDeleteCategory = async (id: number) => {
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      {canManageCategories && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
   <div className="mb-4">
     <h2 className="text-lg font-semibold text-slate-800">
       Manage Categories
@@ -538,6 +609,7 @@ const handleDeleteCategory = async (id: number) => {
     ))}
   </div>
 </div>
+      )}
 
       {/* Products table */}
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -553,8 +625,14 @@ const handleDeleteCategory = async (id: number) => {
                   Category
                 </th>
 
+                {canManageProducts && (
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                    Cost Price
+                  </th>
+                )}
+
                 <th className="px-6 py-4 text-sm font-semibold text-slate-600">
-                  Price
+                  Selling Price
                 </th>
 
                 <th className="px-6 py-4 text-sm font-semibold text-slate-600">
@@ -565,9 +643,11 @@ const handleDeleteCategory = async (id: number) => {
                   Status
                 </th>
 
-                <th className="px-6 py-4 text-sm font-semibold text-slate-600">
-                  Actions
-                </th>
+                {(canManageProducts || canDeleteProducts) && (
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
 
@@ -591,6 +671,12 @@ const handleDeleteCategory = async (id: number) => {
                     <td className="px-6 py-4 text-slate-600">
                       {product.category}
                     </td>
+
+                    {canManageProducts && (
+                      <td className="px-6 py-4 text-slate-600">
+                        KES {product.cost_price.toLocaleString()}
+                      </td>
+                    )}
 
                     <td className="px-6 py-4 font-medium text-slate-800">
                       KES {product.price.toLocaleString()}
@@ -624,31 +710,39 @@ const handleDeleteCategory = async (id: number) => {
                       </span>
                     </td>
 
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          className="rounded px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50"
-                          onClick={() => handleEditProduct(product)}
-                        >
-                          Edit
-                        </button>
+                    {(canManageProducts || canDeleteProducts) && (
+                      <td className="px-6 py-4">
+                        <div className="flex gap-2">
+                          {canManageProducts && (
+                            <button
+                              type="button"
+                              className="rounded px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50"
+                              onClick={() => handleEditProduct(product)}
+                            >
+                              Edit
+                            </button>
+                          )}
 
-                        <button
-                          type="button"
-                          className="rounded px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
-                          onClick={() => handleDeleteProduct(product.id)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
+                          {canDeleteProducts && (
+                            <button
+                              type="button"
+                              className="rounded px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                              onClick={() => handleDeleteProduct(product.id)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               ) : (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={
+                      canManageProducts || canDeleteProducts ? 7 : 5
+                    }
                     className="px-6 py-10 text-center text-slate-500"
                   >
                     No products found.

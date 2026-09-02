@@ -16,6 +16,7 @@ db.exec(`
     name TEXT NOT NULL,
     category TEXT NOT NULL,
     price REAL NOT NULL,
+    cost_price REAL NOT NULL DEFAULT 0,
     stock INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -61,6 +62,7 @@ db.exec(`
     product_name TEXT NOT NULL,
     quantity INTEGER NOT NULL,
     unit_price REAL NOT NULL,
+    cost_price REAL NOT NULL DEFAULT 0,
     subtotal REAL NOT NULL,
 
     FOREIGN KEY (sale_id)
@@ -153,6 +155,35 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_expenses_category
     ON expenses(category);
 `);
+
+// ==========================================================
+// COST PRICE / COGS MIGRATIONS
+// Adds the new columns safely to existing databases.
+// Existing records start at 0 until their historical costs
+// are explicitly established.
+// ==========================================================
+
+const productColumns = db
+  .prepare("PRAGMA table_info(products)")
+  .all() as { name: string }[];
+
+if (!productColumns.some((column) => column.name === "cost_price")) {
+  db.exec(`
+    ALTER TABLE products
+    ADD COLUMN cost_price REAL NOT NULL DEFAULT 0
+  `);
+}
+
+const saleItemColumns = db
+  .prepare("PRAGMA table_info(sale_items)")
+  .all() as { name: string }[];
+
+if (!saleItemColumns.some((column) => column.name === "cost_price")) {
+  db.exec(`
+    ALTER TABLE sale_items
+    ADD COLUMN cost_price REAL NOT NULL DEFAULT 0
+  `);
+}
 
 const insertCategory = db.prepare(`
   INSERT OR IGNORE INTO categories (name)

@@ -91,6 +91,20 @@ type ReturnHistoryRecord = {
 };
 
 function Sales() {
+  const storedUser = localStorage.getItem("user");
+
+  let userRole = "";
+
+  try {
+    const user = storedUser ? JSON.parse(storedUser) : null;
+    userRole = String(user?.role || "").toLowerCase();
+  } catch {
+    userRole = "";
+  }
+
+  const canManageReturns =
+    userRole === "admin" || userRole === "manager";
+
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -169,6 +183,11 @@ function Sales() {
   };
 
   const fetchReturnsHistory = async () => {
+    if (!canManageReturns) {
+      setReturnsHistory([]);
+      return;
+    }
+
     try {
       const response = await apiFetch("/api/sales/returns/history");
 
@@ -186,8 +205,21 @@ function Sales() {
   useEffect(() => {
     fetchProducts();
     fetchSalesHistory();
-    fetchReturnsHistory();
-  }, []);
+
+    if (canManageReturns) {
+      fetchReturnsHistory();
+    }
+  }, [canManageReturns]);
+
+  useEffect(() => {
+    if (!canManageReturns && activeTab === "returns") {
+      setActiveTab("history");
+    }
+
+    if (!canManageReturns && showReturnModal) {
+      setShowReturnModal(false);
+    }
+  }, [canManageReturns, activeTab, showReturnModal]);
 
   const viewSaleDetails = async (id: number) => {
     try {
@@ -213,7 +245,7 @@ function Sales() {
   };
 
   const openReturnModal = () => {
-    if (!selectedSale) return;
+    if (!canManageReturns || !selectedSale) return;
 
     const quantities: Record<number, number> = {};
     selectedSale.items.forEach((item) => {
@@ -252,7 +284,10 @@ function Sales() {
   const handleProcessReturn = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!selectedSale) return;
+    if (!canManageReturns || !selectedSale) {
+      setReturnError("You do not have permission to process returns.");
+      return;
+    }
 
     setReturnError("");
 
@@ -997,7 +1032,11 @@ function Sales() {
 
               </div>
 
-              <div className="grid grid-cols-1 gap-3 pt-2 print:hidden sm:grid-cols-3">
+              <div
+                className={`grid grid-cols-1 gap-3 pt-2 print:hidden ${
+                  canManageReturns ? "sm:grid-cols-3" : "sm:grid-cols-2"
+                }`}
+              >
 
                 <button
                   type="button"
@@ -1009,16 +1048,22 @@ function Sales() {
                   Close
                 </button>
 
-                <button
-                  type="button"
-                  onClick={openReturnModal}
-                  disabled={!selectedSale.items.some((item) => item.returnable_quantity > 0)}
-                  className="flex-1 rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                >
-                  {selectedSale.items.some((item) => item.returnable_quantity > 0)
-                    ? "Return Items"
-                    : "Fully Returned"}
-                </button>
+                {canManageReturns && (
+                  <button
+                    type="button"
+                    onClick={openReturnModal}
+                    disabled={!selectedSale.items.some(
+                      (item) => item.returnable_quantity > 0
+                    )}
+                    className="flex-1 rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {selectedSale.items.some(
+                      (item) => item.returnable_quantity > 0
+                    )
+                      ? "Return Items"
+                      : "Fully Returned"}
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1040,7 +1085,7 @@ function Sales() {
       )}
 
       {/* RETURN / REFUND MODAL */}
-      {showReturnModal && selectedSale && (
+      {canManageReturns && showReturnModal && selectedSale && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 p-5">
@@ -1415,20 +1460,22 @@ function Sales() {
           Sales History
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab("returns");
-            fetchReturnsHistory();
-          }}
-          className={`border-b-2 px-4 py-3 text-sm font-medium transition ${
-            activeTab === "returns"
-              ? "border-orange-600 text-orange-600"
-              : "border-transparent text-slate-500 hover:text-slate-700"
-          }`}
-        >
-          Returns History
-        </button>
+        {canManageReturns && (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("returns");
+              fetchReturnsHistory();
+            }}
+            className={`border-b-2 px-4 py-3 text-sm font-medium transition ${
+              activeTab === "returns"
+                ? "border-orange-600 text-orange-600"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            Returns History
+          </button>
+        )}
 
       </div>
 
@@ -2098,7 +2145,7 @@ function Sales() {
       )}
 
       {/* RETURNS HISTORY TAB */}
-      {activeTab === "returns" && (
+      {canManageReturns && activeTab === "returns" && (
         <div className="space-y-5">
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

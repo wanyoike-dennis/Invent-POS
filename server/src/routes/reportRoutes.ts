@@ -185,6 +185,46 @@ router.get("/", (req, res) => {
       };
 
     // --------------------------------------------------------
+    // COGS SUMMARY
+    // Original COGS follows the sale date.
+    // Returned COGS follows the refund processing date.
+    // --------------------------------------------------------
+
+    const cogsSummary = db
+      .prepare(`
+        SELECT
+          COALESCE(
+            SUM(si.quantity * si.cost_price),
+            0
+          ) AS original_cogs
+        FROM sale_items si
+        INNER JOIN sales s
+          ON s.id = si.sale_id
+        ${saleWhere}
+      `)
+      .get(...saleParams) as {
+        original_cogs: number;
+      };
+
+    const returnedCogsSummary = db
+      .prepare(`
+        SELECT
+          COALESCE(
+            SUM(sri.quantity * si.cost_price),
+            0
+          ) AS returned_cogs
+        FROM sales_return_items sri
+        INNER JOIN sales_returns sr
+          ON sr.id = sri.return_id
+        INNER JOIN sale_items si
+          ON si.id = sri.sale_item_id
+        ${returnWhere}
+      `)
+      .get(...returnParams) as {
+        returned_cogs: number;
+      };
+
+    // --------------------------------------------------------
     // EXPENSE SUMMARY
     // Expenses use expense_date (the actual business expense date).
     // --------------------------------------------------------
@@ -246,12 +286,28 @@ router.get("/", (req, res) => {
       0
     );
 
+    const originalCogs = Number(
+      cogsSummary.original_cogs || 0
+    );
+
+    const returnedCogs = Number(
+      returnedCogsSummary.returned_cogs || 0
+    );
+
+    const netCogs = Math.max(
+      originalCogs - returnedCogs,
+      0
+    );
+
+    const grossProfit =
+      netSales - netCogs;
+
     const expenses = Number(
       expenseSummary.expenses || 0
     );
 
     const netProfit =
-      netSales - expenses;
+      grossProfit - expenses;
 
     // --------------------------------------------------------
     // PAYMENT METHOD TOTALS
@@ -366,6 +422,40 @@ router.get("/", (req, res) => {
 
           COALESCE(
             (
+              SELECT SUM(
+                si2.quantity * si2.cost_price
+              )
+              FROM sale_items si2
+              INNER JOIN sales s3
+                ON s3.id = si2.sale_id
+              WHERE DATE(
+                s3.created_at,
+                'localtime'
+              ) = dates.day
+            ),
+            0
+          ) AS original_cogs,
+
+          COALESCE(
+            (
+              SELECT SUM(
+                sri2.quantity * si3.cost_price
+              )
+              FROM sales_return_items sri2
+              INNER JOIN sales_returns sr3
+                ON sr3.id = sri2.return_id
+              INNER JOIN sale_items si3
+                ON si3.id = sri2.sale_item_id
+              WHERE DATE(
+                sr3.created_at,
+                'localtime'
+              ) = dates.day
+            ),
+            0
+          ) AS returned_cogs,
+
+          COALESCE(
+            (
               SELECT SUM(e2.amount)
 
               FROM expenses e2
@@ -397,6 +487,19 @@ router.get("/", (req, res) => {
           row.refunds || 0
         );
 
+        const dailyOriginalCogs = Number(
+          row.original_cogs || 0
+        );
+
+        const dailyReturnedCogs = Number(
+          row.returned_cogs || 0
+        );
+
+        const dailyNetCogs = Math.max(
+          dailyOriginalCogs - dailyReturnedCogs,
+          0
+        );
+
         const dailyExpenses = Number(
           row.expenses || 0
         );
@@ -405,6 +508,9 @@ router.get("/", (req, res) => {
           gross - refunded,
           0
         );
+
+        const dailyGrossProfit =
+          dailyNetSales - dailyNetCogs;
 
         return {
           date: row.date,
@@ -415,10 +521,18 @@ router.get("/", (req, res) => {
 
           net_sales: dailyNetSales,
 
+          original_cogs: dailyOriginalCogs,
+
+          returned_cogs: dailyReturnedCogs,
+
+          net_cogs: dailyNetCogs,
+
+          gross_profit: dailyGrossProfit,
+
           expenses: dailyExpenses,
 
           net_profit:
-            dailyNetSales - dailyExpenses,
+            dailyGrossProfit - dailyExpenses,
         };
       });
 
@@ -439,6 +553,14 @@ router.get("/", (req, res) => {
         refunds,
 
         net_sales: netSales,
+
+        original_cogs: originalCogs,
+
+        returned_cogs: returnedCogs,
+
+        net_cogs: netCogs,
+
+        gross_profit: grossProfit,
 
         expenses,
 

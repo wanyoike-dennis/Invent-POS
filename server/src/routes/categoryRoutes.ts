@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import { authorizeRoles } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.get("/", (req, res) => {
 });
 
 // Add category
-router.post("/", (req, res) => {
+router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
   const { name } = req.body;
 
   if (!name || !name.trim()) {
@@ -43,7 +44,7 @@ router.post("/", (req, res) => {
 });
 
 // Delete category
-router.delete("/:id", (req, res) => {
+router.delete("/:id", authorizeRoles("admin", "manager"), (req, res) => {
   const { id } = req.params;
 
   db.prepare(

@@ -37,6 +37,8 @@ const user = storedUser
   ? JSON.parse(storedUser)
   : null;
 
+  const userRole = String(user?.role || "").toLowerCase();
+
   const initials = user?.name
   ? user.name
       .split(" ")
@@ -58,21 +60,25 @@ const handleLogout = () => {
       name: "Dashboard",
       path: "/dashboard",
       icon: LayoutDashboard,
+      roles: ["admin", "manager", "cashier"],
     },
     {
       name: "Products",
       path: "/products",
       icon: Package,
+      roles: ["admin", "manager", "cashier"],
     },
     {
       name: "Inventory",
       path: "/inventory",
       icon: Boxes,
+      roles: ["admin", "manager"],
     },
     {
       name: "Sales",
       path: "/sales",
       icon: ShoppingCart,
+      roles: ["admin", "manager", "cashier"],
     },
   ];
 
@@ -81,16 +87,19 @@ const handleLogout = () => {
       name: "Customers",
       path: "/customers",
       icon: Users,
+      roles: ["admin", "manager", "cashier"],
     },
     {
       name: "Suppliers",
       path: "/suppliers",
       icon: Truck,
+      roles: ["admin", "manager", "cashier"],
     },
     {
       name: "Expenses",
       path: "/expenses",
       icon: Wallet,
+      roles: ["admin", "manager"],
     },
   ];
 
@@ -99,6 +108,7 @@ const handleLogout = () => {
       name: "Reports",
       path: "/reports",
       icon: BarChart3,
+      roles: ["admin", "manager"],
     },
   ];
 
@@ -107,6 +117,7 @@ const handleLogout = () => {
       name: "Settings",
       path: "/settings",
       icon: Settings,
+      roles: ["admin"],
     },
   ];
 
@@ -125,7 +136,9 @@ const handleLogout = () => {
         </p>
 
         <div className="space-y-1">
-          {items.map((item) => {
+          {items
+            .filter((item) => item.roles.includes(userRole))
+            .map((item) => {
             const Icon = item.icon;
 
             return (
@@ -237,7 +250,7 @@ const handleLogout = () => {
           <div className="mb-3 flex items-center gap-3 rounded-lg bg-slate-800/60 p-3">
 
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold">
-              AD
+              {initials}
             </div>
 
             <div className="min-w-0 flex-1">

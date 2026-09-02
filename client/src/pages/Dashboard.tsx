@@ -15,6 +15,10 @@ type DashboardData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    original_cogs: number;
+    returned_cogs: number;
+    net_cogs: number;
+    gross_profit: number;
     expenses: number;
     net_profit: number;
     transactions: number;
@@ -30,6 +34,10 @@ type DashboardData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    original_cogs: number;
+    returned_cogs: number;
+    net_cogs: number;
+    gross_profit: number;
     expenses: number;
     net_profit: number;
   }[];
@@ -46,6 +54,18 @@ type DashboardData = {
 };
 
 function Dashboard() {
+  const storedUser = localStorage.getItem("user");
+  let userRole = "";
+
+  try {
+    const user = storedUser ? JSON.parse(storedUser) : null;
+    userRole = String(user?.role || "").toLowerCase();
+  } catch {
+    userRole = "";
+  }
+
+  const isCashier = userRole === "cashier";
+
   const [dashboardData, setDashboardData] =
     useState<DashboardData | null>(null);
 
@@ -128,7 +148,9 @@ function Dashboard() {
           </h1>
 
           <p className="mt-1 text-slate-500">
-            Here's what's happening with your business today.
+            {isCashier
+            ? "Here's your sales activity for today."
+            : "Here's what's happening with your business today."}
           </p>
         </div>
 
@@ -164,6 +186,41 @@ function Dashboard() {
       </div>
 
       {/* Statistics */}
+      {isCashier ? (
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">My Sales Today</p>
+            <h2 className="mt-2 text-2xl font-bold text-green-700">
+              {formatCurrency(dashboardData.today.gross_sales)}
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">Sales processed by you today</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">My Transactions Today</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-800">
+              {dashboardData.today.transactions}
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">Transactions processed by you</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">Products</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-800">
+              {dashboardData.products.total}
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">Active products</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">Low Stock</p>
+            <h2 className="mt-2 text-2xl font-bold text-red-600">
+              {dashboardData.products.low_stock}
+            </h2>
+            <p className="mt-2 text-sm text-red-500">Products need attention</p>
+          </div>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">
@@ -216,7 +273,7 @@ function Dashboard() {
           </h2>
 
           <p className="mt-2 text-sm text-slate-500">
-            Net sales less expenses
+            Gross profit less expenses
           </p>
         </div>
 
@@ -295,27 +352,45 @@ function Dashboard() {
           </p>
         </div>
       </div>
-
+      )}
       {/* Today's profit calculation */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      {!isCashier && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div>
             <h2 className="text-lg font-semibold text-slate-800">
               Today's Profit Calculation
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Net Sales - Expenses = Net Profit
+              Net Sales - Net COGS = Gross Profit; Gross Profit - Expenses = Net Profit
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-lg bg-green-50 px-4 py-3">
               <p className="text-xs font-medium uppercase tracking-wide text-green-700">
                 Net Sales
               </p>
               <p className="mt-1 font-bold text-green-700">
                 {formatCurrency(dashboardData.today.net_sales)}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-600">
+                Net COGS
+              </p>
+              <p className="mt-1 font-bold text-slate-800">
+                {formatCurrency(dashboardData.today.net_cogs)}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-blue-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-blue-700">
+                Gross Profit
+              </p>
+              <p className="mt-1 font-bold text-blue-700">
+                {formatCurrency(dashboardData.today.gross_profit)}
               </p>
             </div>
 
@@ -344,7 +419,6 @@ function Dashboard() {
               >
                 Net Profit
               </p>
-
               <p
                 className={`mt-1 font-bold ${
                   dashboardData.today.net_profit >= 0
@@ -356,18 +430,40 @@ function Dashboard() {
               </p>
             </div>
           </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">
+                Original COGS
+              </p>
+              <p className="mt-1 font-semibold text-slate-700">
+                {formatCurrency(dashboardData.today.original_cogs)}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">
+                Returned COGS
+              </p>
+              <p className="mt-1 font-semibold text-slate-700">
+                {formatCurrency(dashboardData.today.returned_cogs)}
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Sales chart */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-slate-800">
-            Sales, Expenses & Profit Overview
+            {isCashier ? "My 7-Day Sales" : "Sales, Expenses & Profit Overview"}
           </h2>
 
           <p className="text-sm text-slate-500">
-            Sales, refunds, expenses, and profit performance for the last 7 days
+            {isCashier
+              ? "Your sales performance for the last 7 days"
+              : "Sales, refunds, COGS, gross profit, expenses, and net profit for the last 7 days"}
           </p>
         </div>
 
@@ -399,6 +495,7 @@ function Dashboard() {
                 strokeWidth={2}
               />
 
+              {!isCashier && (
               <Line
                 type="monotone"
                 dataKey="refunds"
@@ -406,7 +503,9 @@ function Dashboard() {
                 stroke="#dc2626"
                 strokeWidth={2}
               />
+              )}
 
+              {!isCashier && (
               <Line
                 type="monotone"
                 dataKey="net_sales"
@@ -414,7 +513,29 @@ function Dashboard() {
                 stroke="#16a34a"
                 strokeWidth={3}
               />
+              )}
 
+              {!isCashier && (
+              <Line
+                type="monotone"
+                dataKey="net_cogs"
+                name="Net COGS"
+                stroke="#64748b"
+                strokeWidth={2}
+              />
+              )}
+
+              {!isCashier && (
+              <Line
+                type="monotone"
+                dataKey="gross_profit"
+                name="Gross Profit"
+                stroke="#0284c7"
+                strokeWidth={2}
+              />
+              )}
+
+              {!isCashier && (
               <Line
                 type="monotone"
                 dataKey="expenses"
@@ -422,7 +543,9 @@ function Dashboard() {
                 stroke="#d97706"
                 strokeWidth={2}
               />
+              )}
 
+              {!isCashier && (
               <Line
                 type="monotone"
                 dataKey="net_profit"
@@ -430,6 +553,7 @@ function Dashboard() {
                 stroke="#7c3aed"
                 strokeWidth={3}
               />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -441,11 +565,13 @@ function Dashboard() {
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 p-6">
             <h2 className="text-lg font-semibold text-slate-800">
-              Recent Sales
+              {isCashier ? "My Recent Sales" : "Recent Sales"}
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Latest sales with refunds reflected in the net amount
+              {isCashier
+                ? "Your latest completed transactions"
+                : "Latest sales with refunds reflected in the net amount"}
             </p>
           </div>
 
@@ -520,47 +646,33 @@ function Dashboard() {
             </h2>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 p-6">
-            <button className="rounded-lg bg-blue-50 p-5 text-blue-700 transition hover:bg-blue-100">
-              <p className="font-semibold">
-                New Sale
-              </p>
-
-              <p className="mt-1 text-sm">
-                Start a transaction
-              </p>
-            </button>
-
-            <button className="rounded-lg bg-green-50 p-5 text-green-700 transition hover:bg-green-100">
-              <p className="font-semibold">
-                Add Product
-              </p>
-
-              <p className="mt-1 text-sm">
-                Create new product
-              </p>
-            </button>
-
-            <button className="rounded-lg bg-purple-50 p-5 text-purple-700 transition hover:bg-purple-100">
-              <p className="font-semibold">
-                Add Expense
-              </p>
-
-              <p className="mt-1 text-sm">
-                Record business expense
-              </p>
-            </button>
-
-            <button className="rounded-lg bg-orange-50 p-5 text-orange-700 transition hover:bg-orange-100">
-              <p className="font-semibold">
-                View Reports
-              </p>
-
-              <p className="mt-1 text-sm">
-                Analyze your business
-              </p>
-            </button>
-          </div>
+          {isCashier ? (
+            <div className="p-6">
+              <button className="w-full rounded-lg bg-blue-50 p-5 text-left text-blue-700 transition hover:bg-blue-100">
+                <p className="font-semibold">New Sale</p>
+                <p className="mt-1 text-sm">Start a transaction</p>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 p-6">
+              <button className="rounded-lg bg-blue-50 p-5 text-blue-700 transition hover:bg-blue-100">
+                <p className="font-semibold">New Sale</p>
+                <p className="mt-1 text-sm">Start a transaction</p>
+              </button>
+              <button className="rounded-lg bg-green-50 p-5 text-green-700 transition hover:bg-green-100">
+                <p className="font-semibold">Add Product</p>
+                <p className="mt-1 text-sm">Create new product</p>
+              </button>
+              <button className="rounded-lg bg-purple-50 p-5 text-purple-700 transition hover:bg-purple-100">
+                <p className="font-semibold">Add Expense</p>
+                <p className="mt-1 text-sm">Record business expense</p>
+              </button>
+              <button className="rounded-lg bg-orange-50 p-5 text-orange-700 transition hover:bg-orange-100">
+                <p className="font-semibold">View Reports</p>
+                <p className="mt-1 text-sm">Analyze your business</p>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -7,8 +8,11 @@ const router = express.Router();
 // GET DASHBOARD SUMMARY
 // ============================================================
 
-router.get("/", (req, res) => {
+router.get("/", (req: AuthRequest, res) => {
   try {
+    const isCashier = req.user?.role === "cashier";
+    const userId = req.user?.id;
+
     // --------------------------------------------------------
     // TODAY'S GROSS SALES
     // --------------------------------------------------------
@@ -21,8 +25,9 @@ router.get("/", (req, res) => {
         FROM sales
         WHERE DATE(created_at, 'localtime') =
               DATE('now', 'localtime')
+          ${isCashier ? "AND sold_by = ?" : ""}
       `)
-      .get() as {
+      .get(...(isCashier ? [userId] : [])) as {
         gross_sales: number;
         transactions: number;
       };
@@ -32,19 +37,24 @@ router.get("/", (req, res) => {
     // Uses refund processing date
     // --------------------------------------------------------
 
-    const refundResult = db
-      .prepare(`
-        SELECT
-          COALESCE(SUM(refund_amount), 0) AS refunds,
-          COUNT(*) AS return_transactions
-        FROM sales_returns
-        WHERE DATE(created_at, 'localtime') =
-              DATE('now', 'localtime')
-      `)
-      .get() as {
-        refunds: number;
-        return_transactions: number;
-      };
+    const refundResult = isCashier
+      ? {
+          refunds: 0,
+          return_transactions: 0,
+        }
+      : (db
+          .prepare(`
+            SELECT
+              COALESCE(SUM(refund_amount), 0) AS refunds,
+              COUNT(*) AS return_transactions
+            FROM sales_returns
+            WHERE DATE(created_at, 'localtime') =
+                  DATE('now', 'localtime')
+          `)
+          .get() as {
+            refunds: number;
+            return_transactions: number;
+          });
 
     const grossSales = Number(
       grossResult.gross_sales || 0
@@ -60,30 +70,97 @@ router.get("/", (req, res) => {
     );
 
     // --------------------------------------------------------
+    // TODAY'S COGS
+    // Cost is captured historically on sale_items.
+    // Returned COGS is reversed on the return processing date.
+    // Cashier dashboard remains sales-activity focused.
+    // --------------------------------------------------------
+
+    const cogsResult = db
+      .prepare(`
+        SELECT
+          COALESCE(
+            SUM(si.quantity * si.cost_price),
+            0
+          ) AS original_cogs
+        FROM sale_items si
+        INNER JOIN sales s
+          ON s.id = si.sale_id
+        WHERE DATE(s.created_at, 'localtime') =
+              DATE('now', 'localtime')
+          ${isCashier ? "AND s.sold_by = ?" : ""}
+      `)
+      .get(...(isCashier ? [userId] : [])) as {
+        original_cogs: number;
+      };
+
+    const returnedCogsResult = isCashier
+      ? { returned_cogs: 0 }
+      : (db
+          .prepare(`
+            SELECT
+              COALESCE(
+                SUM(sri.quantity * si.cost_price),
+                0
+              ) AS returned_cogs
+            FROM sales_return_items sri
+            INNER JOIN sales_returns sr
+              ON sr.id = sri.return_id
+            INNER JOIN sale_items si
+              ON si.id = sri.sale_item_id
+            WHERE DATE(sr.created_at, 'localtime') =
+                  DATE('now', 'localtime')
+          `)
+          .get() as {
+            returned_cogs: number;
+          });
+
+    const originalCogs = Number(
+      cogsResult.original_cogs || 0
+    );
+
+    const returnedCogs = Number(
+      returnedCogsResult.returned_cogs || 0
+    );
+
+    const netCogs = Math.max(
+      originalCogs - returnedCogs,
+      0
+    );
+
+    const grossProfit =
+      netSales - netCogs;
+
+    // --------------------------------------------------------
     // TODAY'S EXPENSES
     // Uses the actual business expense date
     // --------------------------------------------------------
 
-    const expenseResult = db
-      .prepare(`
-        SELECT
-          COALESCE(SUM(amount), 0) AS expenses,
-          COUNT(*) AS expense_transactions
-        FROM expenses
-        WHERE DATE(expense_date) =
-              DATE('now', 'localtime')
-      `)
-      .get() as {
-        expenses: number;
-        expense_transactions: number;
-      };
+    const expenseResult = isCashier
+      ? {
+          expenses: 0,
+          expense_transactions: 0,
+        }
+      : (db
+          .prepare(`
+            SELECT
+              COALESCE(SUM(amount), 0) AS expenses,
+              COUNT(*) AS expense_transactions
+            FROM expenses
+            WHERE DATE(expense_date) =
+                  DATE('now', 'localtime')
+          `)
+          .get() as {
+            expenses: number;
+            expense_transactions: number;
+          });
 
     const expenses = Number(
       expenseResult.expenses || 0
     );
 
     const netProfit =
-      netSales - expenses;
+      grossProfit - expenses;
 
     // --------------------------------------------------------
     // PRODUCT SUMMARY
@@ -139,6 +216,7 @@ router.get("/", (req, res) => {
                 s.created_at,
                 'localtime'
               ) = dates.day
+                ${isCashier ? "AND s.sold_by = ?" : ""}
             ),
             0
           ) AS gross_sales,
@@ -157,6 +235,41 @@ router.get("/", (req, res) => {
 
           COALESCE(
             (
+              SELECT SUM(
+                si.quantity * si.cost_price
+              )
+              FROM sale_items si
+              INNER JOIN sales s2
+                ON s2.id = si.sale_id
+              WHERE DATE(
+                s2.created_at,
+                'localtime'
+              ) = dates.day
+                ${isCashier ? "AND s2.sold_by = ?" : ""}
+            ),
+            0
+          ) AS original_cogs,
+
+          COALESCE(
+            (
+              SELECT SUM(
+                sri.quantity * si2.cost_price
+              )
+              FROM sales_return_items sri
+              INNER JOIN sales_returns sr2
+                ON sr2.id = sri.return_id
+              INNER JOIN sale_items si2
+                ON si2.id = sri.sale_item_id
+              WHERE DATE(
+                sr2.created_at,
+                'localtime'
+              ) = dates.day
+            ),
+            0
+          ) AS returned_cogs,
+
+          COALESCE(
+            (
               SELECT SUM(e.amount)
               FROM expenses e
               WHERE DATE(
@@ -170,7 +283,7 @@ router.get("/", (req, res) => {
 
         ORDER BY dates.day ASC
       `)
-      .all()
+      .all(...(isCashier ? [userId, userId] : []))
       .map((row: any) => {
         const gross = Number(
           row.gross_sales || 0
@@ -178,6 +291,19 @@ router.get("/", (req, res) => {
 
         const refunded = Number(
           row.refunds || 0
+        );
+
+        const dailyOriginalCogs = Number(
+          row.original_cogs || 0
+        );
+
+        const dailyReturnedCogs = isCashier
+          ? 0
+          : Number(row.returned_cogs || 0);
+
+        const dailyNetCogs = Math.max(
+          dailyOriginalCogs - dailyReturnedCogs,
+          0
         );
 
         const dailyExpenses = Number(
@@ -189,14 +315,21 @@ router.get("/", (req, res) => {
           0
         );
 
+        const dailyGrossProfit =
+          dailyNetSales - dailyNetCogs;
+
         return {
           date: row.date,
           gross_sales: gross,
           refunds: refunded,
           net_sales: dailyNetSales,
+          original_cogs: dailyOriginalCogs,
+          returned_cogs: dailyReturnedCogs,
+          net_cogs: dailyNetCogs,
+          gross_profit: dailyGrossProfit,
           expenses: dailyExpenses,
           net_profit:
-            dailyNetSales - dailyExpenses,
+            dailyGrossProfit - dailyExpenses,
         };
       });
 
@@ -229,11 +362,13 @@ router.get("/", (req, res) => {
         LEFT JOIN users
           ON users.id = s.sold_by
 
+        ${isCashier ? "WHERE s.sold_by = ?" : ""}
+
         ORDER BY s.id DESC
 
         LIMIT 5
       `)
-      .all()
+      .all(...(isCashier ? [userId] : []))
       .map((sale: any) => {
         const originalTotal = Number(
           sale.total
@@ -268,6 +403,10 @@ router.get("/", (req, res) => {
         gross_sales: grossSales,
         refunds,
         net_sales: netSales,
+        original_cogs: originalCogs,
+        returned_cogs: returnedCogs,
+        net_cogs: netCogs,
+        gross_profit: grossProfit,
         expenses,
         net_profit: netProfit,
 
