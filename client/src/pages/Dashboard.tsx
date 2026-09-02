@@ -15,8 +15,11 @@ type DashboardData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    expenses: number;
+    net_profit: number;
     transactions: number;
     return_transactions: number;
+    expense_transactions: number;
   };
   products: {
     total: number;
@@ -27,6 +30,8 @@ type DashboardData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    expenses: number;
+    net_profit: number;
   }[];
   recent_sales: {
     id: number;
@@ -159,13 +164,13 @@ function Dashboard() {
       </div>
 
       {/* Statistics */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">
             Net Sales Today
           </p>
 
-          <h2 className="mt-2 text-2xl font-bold text-slate-800">
+          <h2 className="mt-2 text-2xl font-bold text-green-700">
             {formatCurrency(
               dashboardData.today.net_sales
             )}
@@ -173,6 +178,45 @@ function Dashboard() {
 
           <p className="mt-2 text-sm text-slate-500">
             After today's refunds
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-slate-500">
+            Expenses Today
+          </p>
+
+          <h2 className="mt-2 text-2xl font-bold text-amber-700">
+            {formatCurrency(
+              dashboardData.today.expenses
+            )}
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">
+            {dashboardData.today.expense_transactions} expense transaction
+            {dashboardData.today.expense_transactions === 1 ? "" : "s"}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-slate-500">
+            Net Profit Today
+          </p>
+
+          <h2
+            className={`mt-2 text-2xl font-bold ${
+              dashboardData.today.net_profit >= 0
+                ? "text-emerald-700"
+                : "text-red-600"
+            }`}
+          >
+            {formatCurrency(
+              dashboardData.today.net_profit
+            )}
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">
+            Net sales less expenses
           </p>
         </div>
 
@@ -204,15 +248,8 @@ function Dashboard() {
           </h2>
 
           <p className="mt-2 text-sm text-red-500">
-            {
-              dashboardData.today
-                .return_transactions
-            }{" "}
-            return transaction
-            {dashboardData.today
-              .return_transactions === 1
-              ? ""
-              : "s"}
+            {dashboardData.today.return_transactions} return transaction
+            {dashboardData.today.return_transactions === 1 ? "" : "s"}
           </p>
         </div>
 
@@ -222,10 +259,7 @@ function Dashboard() {
           </p>
 
           <h2 className="mt-2 text-2xl font-bold text-slate-800">
-            {
-              dashboardData.today
-                .transactions
-            }
+            {dashboardData.today.transactions}
           </h2>
 
           <p className="mt-2 text-sm text-slate-500">
@@ -262,15 +296,78 @@ function Dashboard() {
         </div>
       </div>
 
+      {/* Today's profit calculation */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800">
+              Today's Profit Calculation
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Net Sales - Expenses = Net Profit
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg bg-green-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-green-700">
+                Net Sales
+              </p>
+              <p className="mt-1 font-bold text-green-700">
+                {formatCurrency(dashboardData.today.net_sales)}
+              </p>
+            </div>
+
+            <div className="rounded-lg bg-amber-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-amber-700">
+                Expenses
+              </p>
+              <p className="mt-1 font-bold text-amber-700">
+                {formatCurrency(dashboardData.today.expenses)}
+              </p>
+            </div>
+
+            <div
+              className={`rounded-lg px-4 py-3 ${
+                dashboardData.today.net_profit >= 0
+                  ? "bg-emerald-50"
+                  : "bg-red-50"
+              }`}
+            >
+              <p
+                className={`text-xs font-medium uppercase tracking-wide ${
+                  dashboardData.today.net_profit >= 0
+                    ? "text-emerald-700"
+                    : "text-red-700"
+                }`}
+              >
+                Net Profit
+              </p>
+
+              <p
+                className={`mt-1 font-bold ${
+                  dashboardData.today.net_profit >= 0
+                    ? "text-emerald-700"
+                    : "text-red-700"
+                }`}
+              >
+                {formatCurrency(dashboardData.today.net_profit)}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Sales chart */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-slate-800">
-            Net Sales Overview
+            Sales, Expenses & Profit Overview
           </h2>
 
           <p className="text-sm text-slate-500">
-            Refund-aware sales performance for the last 7 days
+            Sales, refunds, expenses, and profit performance for the last 7 days
           </p>
         </div>
 
@@ -296,9 +393,41 @@ function Dashboard() {
 
               <Line
                 type="monotone"
+                dataKey="gross_sales"
+                name="Gross Sales"
+                stroke="#2563eb"
+                strokeWidth={2}
+              />
+
+              <Line
+                type="monotone"
+                dataKey="refunds"
+                name="Refunds"
+                stroke="#dc2626"
+                strokeWidth={2}
+              />
+
+              <Line
+                type="monotone"
                 dataKey="net_sales"
                 name="Net Sales"
-                stroke="#2563eb"
+                stroke="#16a34a"
+                strokeWidth={3}
+              />
+
+              <Line
+                type="monotone"
+                dataKey="expenses"
+                name="Expenses"
+                stroke="#d97706"
+                strokeWidth={2}
+              />
+
+              <Line
+                type="monotone"
+                dataKey="net_profit"
+                name="Net Profit"
+                stroke="#7c3aed"
                 strokeWidth={3}
               />
             </LineChart>

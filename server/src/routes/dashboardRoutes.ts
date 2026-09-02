@@ -60,6 +60,32 @@ router.get("/", (req, res) => {
     );
 
     // --------------------------------------------------------
+    // TODAY'S EXPENSES
+    // Uses the actual business expense date
+    // --------------------------------------------------------
+
+    const expenseResult = db
+      .prepare(`
+        SELECT
+          COALESCE(SUM(amount), 0) AS expenses,
+          COUNT(*) AS expense_transactions
+        FROM expenses
+        WHERE DATE(expense_date) =
+              DATE('now', 'localtime')
+      `)
+      .get() as {
+        expenses: number;
+        expense_transactions: number;
+      };
+
+    const expenses = Number(
+      expenseResult.expenses || 0
+    );
+
+    const netProfit =
+      netSales - expenses;
+
+    // --------------------------------------------------------
     // PRODUCT SUMMARY
     // --------------------------------------------------------
 
@@ -127,7 +153,18 @@ router.get("/", (req, res) => {
               ) = dates.day
             ),
             0
-          ) AS refunds
+          ) AS refunds,
+
+          COALESCE(
+            (
+              SELECT SUM(e.amount)
+              FROM expenses e
+              WHERE DATE(
+                e.expense_date
+              ) = dates.day
+            ),
+            0
+          ) AS expenses
 
         FROM dates
 
@@ -143,14 +180,23 @@ router.get("/", (req, res) => {
           row.refunds || 0
         );
 
+        const dailyExpenses = Number(
+          row.expenses || 0
+        );
+
+        const dailyNetSales = Math.max(
+          gross - refunded,
+          0
+        );
+
         return {
           date: row.date,
           gross_sales: gross,
           refunds: refunded,
-          net_sales: Math.max(
-            gross - refunded,
-            0
-          ),
+          net_sales: dailyNetSales,
+          expenses: dailyExpenses,
+          net_profit:
+            dailyNetSales - dailyExpenses,
         };
       });
 
@@ -222,6 +268,8 @@ router.get("/", (req, res) => {
         gross_sales: grossSales,
         refunds,
         net_sales: netSales,
+        expenses,
+        net_profit: netProfit,
 
         transactions: Number(
           grossResult.transactions || 0
@@ -229,6 +277,11 @@ router.get("/", (req, res) => {
 
         return_transactions: Number(
           refundResult.return_transactions ||
+            0
+        ),
+
+        expense_transactions: Number(
+          expenseResult.expense_transactions ||
             0
         ),
       },
