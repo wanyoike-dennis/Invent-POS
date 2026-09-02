@@ -25,6 +25,12 @@ type Sale = {
   id: number;
   receipt_number: string;
   total: number;
+  refunded_amount: number;
+  net_total: number;
+  refund_status:
+    | "Not Refunded"
+    | "Partially Refunded"
+    | "Fully Refunded";
   payment_method: string;
   amount_paid: number;
   change_amount: number;
@@ -362,22 +368,37 @@ function Sales() {
   const todaySummary = useMemo(() => {
     const now = new Date();
 
-    const todayYear = now.getFullYear();
-    const todayMonth = now.getMonth();
-    const todayDate = now.getDate();
-
-    const todaysSales = salesHistory.filter((sale) => {
-      const saleDate = new Date(sale.created_at);
+    const isToday = (value: string) => {
+      const date = new Date(value);
 
       return (
-        saleDate.getFullYear() === todayYear &&
-        saleDate.getMonth() === todayMonth &&
-        saleDate.getDate() === todayDate
+        date.getFullYear() === now.getFullYear() &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate()
       );
-    });
+    };
 
-    const totalSales = todaysSales.reduce(
+    const todaysSales = salesHistory.filter((sale) =>
+      isToday(sale.created_at)
+    );
+
+    const todaysReturns = returnsHistory.filter((record) =>
+      isToday(record.created_at)
+    );
+
+    const grossSales = todaysSales.reduce(
       (sum, sale) => sum + Number(sale.total),
+      0
+    );
+
+    const refundsToday = todaysReturns.reduce(
+      (sum, record) =>
+        sum + Number(record.refund_amount),
+      0
+    );
+
+    const netSales = Math.max(
+      grossSales - refundsToday,
       0
     );
 
@@ -386,7 +407,7 @@ function Sales() {
         (sale) => sale.payment_method === "Cash"
       )
       .reduce(
-        (sum, sale) => sum + Number(sale.total),
+        (sum, sale) => sum + Number(sale.net_total),
         0
       );
 
@@ -395,17 +416,19 @@ function Sales() {
         (sale) => sale.payment_method === "M-Pesa"
       )
       .reduce(
-        (sum, sale) => sum + Number(sale.total),
+        (sum, sale) => sum + Number(sale.net_total),
         0
       );
 
     return {
-      totalSales,
+      grossSales,
+      refundsToday,
+      netSales,
       transactions: todaysSales.length,
       cashSales,
       mpesaSales,
     };
-  }, [salesHistory]);
+  }, [salesHistory, returnsHistory]);
 
   const filteredReturns = useMemo(() => {
     return returnsHistory.filter((record) => {
@@ -1710,21 +1733,55 @@ function Sales() {
           {/* TODAY SUMMARY */}
           <div className="border-b border-slate-200 bg-slate-50/50 p-5">
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
 
               <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
 
                 <p className="text-sm font-medium text-slate-500">
-                  Today's Sales
+                  Gross Sales Today
                 </p>
 
                 <p className="mt-2 text-2xl font-bold text-slate-800">
                   KES{" "}
-                  {todaySummary.totalSales.toLocaleString()}
+                  {todaySummary.grossSales.toLocaleString()}
                 </p>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  Total revenue today
+                  Sales before refunds
+                </p>
+
+              </div>
+
+              <div className="rounded-xl border border-orange-200 bg-white p-5 shadow-sm">
+
+                <p className="text-sm font-medium text-slate-500">
+                  Refunds Today
+                </p>
+
+                <p className="mt-2 text-2xl font-bold text-orange-600">
+                  - KES{" "}
+                  {todaySummary.refundsToday.toLocaleString()}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Refunds processed today
+                </p>
+
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+
+                <p className="text-sm font-medium text-slate-500">
+                  Net Sales Today
+                </p>
+
+                <p className="mt-2 text-2xl font-bold text-slate-800">
+                  KES{" "}
+                  {todaySummary.netSales.toLocaleString()}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Gross sales minus today's refunds
                 </p>
 
               </div>
@@ -1757,7 +1814,7 @@ function Sales() {
                 </p>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  Cash received today
+                  Current net cash sales
                 </p>
 
               </div>
@@ -1774,7 +1831,7 @@ function Sales() {
                 </p>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  M-Pesa received today
+                  Current net M-Pesa sales
                 </p>
 
               </div>
@@ -1865,12 +1922,25 @@ function Sales() {
               <thead className="border-b border-slate-200 bg-slate-50">
 
                 <tr>
+
                   <th className="px-6 py-4 text-sm font-semibold text-slate-600">
                     Receipt
                   </th>
 
                   <th className="px-6 py-4 text-sm font-semibold text-slate-600">
-                    Total
+                    Original
+                  </th>
+
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                    Refunded
+                  </th>
+
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                    Net Sale
+                  </th>
+
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                    Status
                   </th>
 
                   <th className="px-6 py-4 text-sm font-semibold text-slate-600">
@@ -1888,6 +1958,7 @@ function Sales() {
                   <th className="px-6 py-4 text-sm font-semibold text-slate-600">
                     Action
                   </th>
+
                 </tr>
 
               </thead>
@@ -1895,19 +1966,64 @@ function Sales() {
               <tbody className="divide-y divide-slate-200">
 
                 {filteredSales.length > 0 ? (
+
                   filteredSales.map((sale) => (
+
                     <tr
                       key={sale.id}
                       className="transition hover:bg-slate-50"
                     >
 
-                      <td className="px-6 py-4 font-medium text-slate-800">
+                      <td className="whitespace-nowrap px-6 py-4 font-medium text-slate-800">
                         {sale.receipt_number}
                       </td>
 
-                      <td className="px-6 py-4 font-semibold text-slate-800">
+                      <td className="whitespace-nowrap px-6 py-4 font-semibold text-slate-800">
+                        KES {Number(sale.total).toLocaleString()}
+                      </td>
+
+                      <td className="whitespace-nowrap px-6 py-4">
+
+                        {sale.refunded_amount > 0 ? (
+
+                          <span className="font-semibold text-orange-600">
+                            - KES{" "}
+                            {Number(
+                              sale.refunded_amount
+                            ).toLocaleString()}
+                          </span>
+
+                        ) : (
+
+                          <span className="text-slate-400">
+                            —
+                          </span>
+
+                        )}
+
+                      </td>
+
+                      <td className="whitespace-nowrap px-6 py-4 font-bold text-slate-800">
                         KES{" "}
-                        {sale.total.toLocaleString()}
+                        {Number(
+                          sale.net_total
+                        ).toLocaleString()}
+                      </td>
+
+                      <td className="whitespace-nowrap px-6 py-4">
+
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            sale.refund_status === "Fully Refunded"
+                              ? "bg-red-50 text-red-700"
+                              : sale.refund_status === "Partially Refunded"
+                              ? "bg-orange-50 text-orange-700"
+                              : "bg-green-50 text-green-700"
+                          }`}
+                        >
+                          {sale.refund_status}
+                        </span>
+
                       </td>
 
                       <td className="px-6 py-4">
@@ -1924,7 +2040,7 @@ function Sales() {
 
                       </td>
 
-                      <td className="px-6 py-4 text-slate-600">
+                      <td className="whitespace-nowrap px-6 py-4 text-slate-600">
                         {sale.sold_by_name || "Unknown"}
                       </td>
 
@@ -1952,12 +2068,15 @@ function Sales() {
                       </td>
 
                     </tr>
+
                   ))
+
                 ) : (
+
                   <tr>
 
                     <td
-                      colSpan={6}
+                      colSpan={9}
                       className="px-6 py-12 text-center text-slate-500"
                     >
                       {salesHistory.length === 0
@@ -1966,6 +2085,7 @@ function Sales() {
                     </td>
 
                   </tr>
+
                 )}
 
               </tbody>

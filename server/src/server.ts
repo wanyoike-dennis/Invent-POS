@@ -6,6 +6,9 @@ import categoryRoutes from "./routes/categoryRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import { authenticateToken } from "./middleware/authMiddleware.js";
 import saleRoutes from "./routes/saleRoutes.js";
+import dashboardRoutes from "./routes/dashboardRoutes.js";
+import reportRoutes from "./routes/reportRoutes.js";
+import expenseRoutes from "./routes/expenseRoutes.js";
 
 dotenv.config();
 
@@ -27,6 +30,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", authenticateToken, productRoutes);
 app.use("/api/categories", authenticateToken, categoryRoutes);
 app.use("/api/sales",authenticateToken,saleRoutes);
+app.use("/api/dashboard",authenticateToken,dashboardRoutes);
+app.use("/api/reports",authenticateToken,reportRoutes);
+app.use("/api/expenses",authenticateToken,expenseRoutes);
 
 
 
