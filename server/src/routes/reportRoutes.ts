@@ -28,9 +28,11 @@ router.get("/", (req, res) => {
 
     const saleConditions: string[] = [];
     const returnConditions: string[] = [];
+    const expenseConditions: string[] = [];
 
     const saleParams: string[] = [];
     const returnParams: string[] = [];
+    const expenseParams: string[] = [];
 
     if (startDate) {
       saleConditions.push(
@@ -41,8 +43,13 @@ router.get("/", (req, res) => {
         "DATE(sr.created_at, 'localtime') >= DATE(?)"
       );
 
+      expenseConditions.push(
+        "DATE(e.expense_date) >= DATE(?)"
+      );
+
       saleParams.push(startDate);
       returnParams.push(startDate);
+      expenseParams.push(startDate);
     }
 
     if (endDate) {
@@ -54,8 +61,13 @@ router.get("/", (req, res) => {
         "DATE(sr.created_at, 'localtime') <= DATE(?)"
       );
 
+      expenseConditions.push(
+        "DATE(e.expense_date) <= DATE(?)"
+      );
+
       saleParams.push(endDate);
       returnParams.push(endDate);
+      expenseParams.push(endDate);
     }
 
     const saleWhere =
@@ -66,6 +78,11 @@ router.get("/", (req, res) => {
     const returnWhere =
       returnConditions.length > 0
         ? `WHERE ${returnConditions.join(" AND ")}`
+        : "";
+
+    const expenseWhere =
+      expenseConditions.length > 0
+        ? `WHERE ${expenseConditions.join(" AND ")}`
         : "";
 
     // --------------------------------------------------------
@@ -168,6 +185,51 @@ router.get("/", (req, res) => {
       };
 
     // --------------------------------------------------------
+    // EXPENSE SUMMARY
+    // Expenses use expense_date (the actual business expense date).
+    // --------------------------------------------------------
+
+    const expenseSummary = db
+      .prepare(`
+        SELECT
+          COALESCE(SUM(e.amount), 0) AS expenses,
+
+          COUNT(*) AS expense_transactions,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN e.payment_method = 'Cash'
+                THEN e.amount
+                ELSE 0
+              END
+            ),
+            0
+          ) AS cash_expenses,
+
+          COALESCE(
+            SUM(
+              CASE
+                WHEN e.payment_method = 'M-Pesa'
+                THEN e.amount
+                ELSE 0
+              END
+            ),
+            0
+          ) AS mpesa_expenses
+
+        FROM expenses e
+
+        ${expenseWhere}
+      `)
+      .get(...expenseParams) as {
+        expenses: number;
+        expense_transactions: number;
+        cash_expenses: number;
+        mpesa_expenses: number;
+      };
+
+    // --------------------------------------------------------
     // OVERALL TOTALS
     // --------------------------------------------------------
 
@@ -183,6 +245,13 @@ router.get("/", (req, res) => {
       grossSales - refunds,
       0
     );
+
+    const expenses = Number(
+      expenseSummary.expenses || 0
+    );
+
+    const netProfit =
+      netSales - expenses;
 
     // --------------------------------------------------------
     // PAYMENT METHOD TOTALS
@@ -214,6 +283,14 @@ router.get("/", (req, res) => {
       0
     );
 
+    const cashExpenses = Number(
+      expenseSummary.cash_expenses || 0
+    );
+
+    const mpesaExpenses = Number(
+      expenseSummary.mpesa_expenses || 0
+    );
+
     // --------------------------------------------------------
     // DAILY REPORT
     // Combines sales date and refund processing date
@@ -243,6 +320,15 @@ router.get("/", (req, res) => {
           FROM sales_returns sr
 
           ${returnWhere}
+
+          UNION
+
+          SELECT
+            DATE(e.expense_date) AS day
+
+          FROM expenses e
+
+          ${expenseWhere}
         )
 
         SELECT
@@ -276,7 +362,20 @@ router.get("/", (req, res) => {
               ) = dates.day
             ),
             0
-          ) AS refunds
+          ) AS refunds,
+
+          COALESCE(
+            (
+              SELECT SUM(e2.amount)
+
+              FROM expenses e2
+
+              WHERE DATE(
+                e2.expense_date
+              ) = dates.day
+            ),
+            0
+          ) AS expenses
 
         FROM dates
 
@@ -286,7 +385,8 @@ router.get("/", (req, res) => {
       `)
       .all(
         ...saleParams,
-        ...returnParams
+        ...returnParams,
+        ...expenseParams
       )
       .map((row: any) => {
         const gross = Number(
@@ -297,6 +397,15 @@ router.get("/", (req, res) => {
           row.refunds || 0
         );
 
+        const dailyExpenses = Number(
+          row.expenses || 0
+        );
+
+        const dailyNetSales = Math.max(
+          gross - refunded,
+          0
+        );
+
         return {
           date: row.date,
 
@@ -304,10 +413,12 @@ router.get("/", (req, res) => {
 
           refunds: refunded,
 
-          net_sales: Math.max(
-            gross - refunded,
-            0
-          ),
+          net_sales: dailyNetSales,
+
+          expenses: dailyExpenses,
+
+          net_profit:
+            dailyNetSales - dailyExpenses,
         };
       });
 
@@ -329,12 +440,21 @@ router.get("/", (req, res) => {
 
         net_sales: netSales,
 
+        expenses,
+
+        net_profit: netProfit,
+
         transactions: Number(
           salesSummary.transactions || 0
         ),
 
         return_transactions: Number(
           refundSummary.return_transactions ||
+            0
+        ),
+
+        expense_transactions: Number(
+          expenseSummary.expense_transactions ||
             0
         ),
 
@@ -348,6 +468,9 @@ router.get("/", (req, res) => {
         net_cash_sales:
           netCashSales,
 
+        cash_expenses:
+          cashExpenses,
+
         // M-Pesa
         gross_mpesa_sales:
           grossMpesaSales,
@@ -357,6 +480,9 @@ router.get("/", (req, res) => {
 
         net_mpesa_sales:
           netMpesaSales,
+
+        mpesa_expenses:
+          mpesaExpenses,
       },
 
       daily_sales: dailySales,

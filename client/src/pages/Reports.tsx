@@ -20,16 +20,21 @@ type ReportData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    expenses: number;
+    net_profit: number;
     transactions: number;
     return_transactions: number;
+    expense_transactions: number;
 
     gross_cash_sales: number;
     cash_refunds: number;
     net_cash_sales: number;
+    cash_expenses: number;
 
     gross_mpesa_sales: number;
     mpesa_refunds: number;
     net_mpesa_sales: number;
+    mpesa_expenses: number;
   };
 
   daily_sales: {
@@ -37,6 +42,8 @@ type ReportData = {
     gross_sales: number;
     refunds: number;
     net_sales: number;
+    expenses: number;
+    net_profit: number;
   }[];
 };
 
@@ -208,7 +215,7 @@ function Reports() {
         </h1>
 
         <p className="mt-1 text-slate-500">
-          Analyze gross sales, refunds, net sales, and payment methods.
+          Analyze sales, refunds, expenses, profit, and payment methods.
         </p>
       </div>
 
@@ -292,7 +299,7 @@ function Reports() {
         </div>
       ) : reportData ? (
         <>
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-sm text-slate-500">
                 Gross Sales
@@ -338,7 +345,42 @@ function Reports() {
 
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-sm text-slate-500">
-                Transactions
+                Expenses
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold text-amber-700">
+                {formatCurrency(reportData.summary.expenses)}
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                {reportData.summary.expense_transactions} expense transaction
+                {reportData.summary.expense_transactions === 1 ? "" : "s"}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">
+                Net Profit
+              </p>
+
+              <h2
+                className={`mt-2 text-2xl font-bold ${
+                  reportData.summary.net_profit >= 0
+                    ? "text-emerald-700"
+                    : "text-red-600"
+                }`}
+              >
+                {formatCurrency(reportData.summary.net_profit)}
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Net sales less expenses
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">
+                Sales Transactions
               </p>
 
               <h2 className="mt-2 text-2xl font-bold text-slate-800">
@@ -363,6 +405,20 @@ function Reports() {
                 Processed returns
               </p>
             </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">
+                Expense Transactions
+              </p>
+
+              <h2 className="mt-2 text-2xl font-bold text-slate-800">
+                {reportData.summary.expense_transactions}
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                Recorded expenses
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -376,7 +432,7 @@ function Reports() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-lg bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">
                     Gross Cash
@@ -403,6 +459,15 @@ function Reports() {
                     {formatCurrency(reportData.summary.net_cash_sales)}
                   </p>
                 </div>
+
+                <div className="rounded-lg bg-amber-50 p-4">
+                  <p className="text-sm text-amber-700">
+                    Cash Expenses
+                  </p>
+                  <p className="mt-2 text-xl font-bold text-amber-700">
+                    {formatCurrency(reportData.summary.cash_expenses)}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -416,7 +481,7 @@ function Reports() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-lg bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">
                     Gross M-Pesa
@@ -441,6 +506,15 @@ function Reports() {
                   </p>
                   <p className="mt-2 text-xl font-bold text-green-700">
                     {formatCurrency(reportData.summary.net_mpesa_sales)}
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-amber-50 p-4">
+                  <p className="text-sm text-amber-700">
+                    M-Pesa Expenses
+                  </p>
+                  <p className="mt-2 text-xl font-bold text-amber-700">
+                    {formatCurrency(reportData.summary.mpesa_expenses)}
                   </p>
                 </div>
               </div>
@@ -472,19 +546,80 @@ function Reports() {
             </div>
           </div>
 
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">
+                  Profit Calculation
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Net Sales - Expenses = Net Profit
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-lg bg-green-50 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-green-700">
+                    Net Sales
+                  </p>
+                  <p className="mt-1 font-bold text-green-700">
+                    {formatCurrency(reportData.summary.net_sales)}
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-amber-50 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-amber-700">
+                    Expenses
+                  </p>
+                  <p className="mt-1 font-bold text-amber-700">
+                    {formatCurrency(reportData.summary.expenses)}
+                  </p>
+                </div>
+
+                <div
+                  className={`rounded-lg px-4 py-3 ${
+                    reportData.summary.net_profit >= 0
+                      ? "bg-emerald-50"
+                      : "bg-red-50"
+                  }`}
+                >
+                  <p
+                    className={`text-xs font-medium uppercase tracking-wide ${
+                      reportData.summary.net_profit >= 0
+                        ? "text-emerald-700"
+                        : "text-red-700"
+                    }`}
+                  >
+                    Net Profit
+                  </p>
+                  <p
+                    className={`mt-1 font-bold ${
+                      reportData.summary.net_profit >= 0
+                        ? "text-emerald-700"
+                        : "text-red-700"
+                    }`}
+                  >
+                    {formatCurrency(reportData.summary.net_profit)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-slate-800">
                 Daily Sales Trend
               </h2>
               <p className="text-sm text-slate-500">
-                Gross, refunds, and net sales for the selected period.
+                Gross sales, refunds, net sales, expenses, and profit for the selected period.
               </p>
             </div>
 
             {chartData.length === 0 ? (
               <div className="flex h-72 items-center justify-center text-sm text-slate-500">
-                No sales or refunds found for this period.
+                No sales, refunds, or expenses found for this period.
               </div>
             ) : (
               <div className="h-80">
@@ -523,6 +658,22 @@ function Reports() {
                       stroke="#16a34a"
                       strokeWidth={3}
                     />
+
+                    <Line
+                      type="monotone"
+                      dataKey="expenses"
+                      name="Expenses"
+                      stroke="#d97706"
+                      strokeWidth={2}
+                    />
+
+                    <Line
+                      type="monotone"
+                      dataKey="net_profit"
+                      name="Net Profit"
+                      stroke="#7c3aed"
+                      strokeWidth={3}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -542,7 +693,7 @@ function Reports() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px]">
+                <table className="w-full min-w-[950px]">
                   <thead className="bg-slate-50">
                     <tr>
                       <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -556,6 +707,12 @@ function Reports() {
                       </th>
                       <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Net Sales
+                      </th>
+                      <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Expenses
+                      </th>
+                      <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Net Profit
                       </th>
                     </tr>
                   </thead>
@@ -579,6 +736,20 @@ function Reports() {
 
                         <td className="px-5 py-4 text-right text-sm font-semibold text-slate-800">
                           {formatCurrency(row.net_sales)}
+                        </td>
+
+                        <td className="px-5 py-4 text-right text-sm text-amber-700">
+                          {formatCurrency(row.expenses)}
+                        </td>
+
+                        <td
+                          className={`px-5 py-4 text-right text-sm font-semibold ${
+                            row.net_profit >= 0
+                              ? "text-emerald-700"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {formatCurrency(row.net_profit)}
                         </td>
                       </tr>
                     ))}
