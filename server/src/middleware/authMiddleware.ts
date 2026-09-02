@@ -54,3 +54,32 @@ export const authenticateToken = (
     });
   }
 };
+
+export const authorizeRoles = (...allowedRoles: string[]) => {
+  return (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+  ) => {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Authentication required.",
+      });
+    }
+
+    const userRole = String(req.user.role || "").toLowerCase();
+
+    const normalizedAllowedRoles = allowedRoles.map((role) =>
+      role.toLowerCase()
+    );
+
+    if (!normalizedAllowedRoles.includes(userRole)) {
+      return res.status(403).json({
+        message: "You do not have permission to perform this action.",
+      });
+    }
+
+    next();
+  };
+};
+

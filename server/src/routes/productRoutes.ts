@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import { authorizeRoles } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.get("/", (req, res) => {
   res.json(products);
 });
 
-router.post("/", (req, res) => {
+router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
   const { name, category, price, stock } = req.body;
 
   if (!name || !category || price === undefined || stock === undefined) {
@@ -36,7 +37,7 @@ router.post("/", (req, res) => {
   res.status(201).json(product);
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
   const { id } = req.params;
   const { name, category, price, stock } = req.body;
 
@@ -53,7 +54,7 @@ router.put("/:id", (req, res) => {
   res.json(product);
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", authorizeRoles("admin"), (req, res) => {
   const { id } = req.params;
 
   db.prepare(
@@ -65,7 +66,7 @@ router.delete("/:id", (req, res) => {
   });
 });
 
-router.patch("/:id/stock", (req, res) => {
+router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req, res) => {
   const { id } = req.params;
   const { type, quantity, reason } = req.body;
 
@@ -149,7 +150,7 @@ router.patch("/:id/stock", (req, res) => {
 });
 
 
-router.get("/stock/history", (req, res) => {
+router.get("/stock/history", authorizeRoles("admin", "manager"), (req, res) => {
   const movements = db
     .prepare(`
       SELECT
