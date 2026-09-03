@@ -231,6 +231,273 @@ router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req, res) => {
 });
 
 
+// ==========================================================
+// WHOLESALE PURCHASE / RESTOCK
+// Calculates unit cost and weighted-average inventory cost.
+// Admin and Manager only.
+// ==========================================================
+
+router.post(
+  "/:id/purchase",
+  authorizeRoles("admin", "manager"),
+  (req: AuthRequest, res) => {
+    const { id } = req.params;
+    const {
+      quantity,
+      total_cost,
+      purchase_date,
+      supplier_id,
+      reference,
+      notes,
+    } = req.body;
+
+    const qty = Number(quantity);
+    const totalCost = Number(total_cost);
+
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return res.status(400).json({
+        message: "Purchase quantity must be a positive whole number",
+      });
+    }
+
+    if (!Number.isFinite(totalCost) || totalCost <= 0) {
+      return res.status(400).json({
+        message: "Total purchase cost must be greater than 0",
+      });
+    }
+
+    if (!purchase_date || typeof purchase_date !== "string") {
+      return res.status(400).json({
+        message: "Purchase date is required",
+      });
+    }
+
+    let supplierId: number | null = null;
+
+    if (
+      supplier_id !== undefined &&
+      supplier_id !== null &&
+      supplier_id !== ""
+    ) {
+      supplierId = Number(supplier_id);
+
+      if (!Number.isInteger(supplierId) || supplierId <= 0) {
+        return res.status(400).json({
+          message: "Invalid supplier selected",
+        });
+      }
+
+      const supplier = db
+        .prepare(`
+          SELECT id
+          FROM suppliers
+          WHERE id = ?
+        `)
+        .get(supplierId);
+
+      if (!supplier) {
+        return res.status(404).json({
+          message: "Supplier not found",
+        });
+      }
+    }
+
+    const product = db
+      .prepare(`
+        SELECT
+          id,
+          name,
+          stock,
+          cost_price,
+          price
+        FROM products
+        WHERE id = ?
+      `)
+      .get(id) as
+      | {
+          id: number;
+          name: string;
+          stock: number;
+          cost_price: number;
+          price: number;
+        }
+      | undefined;
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    const previousStock = Number(product.stock || 0);
+    const previousCostPrice = Number(product.cost_price || 0);
+
+    // Keep inventory money values at 2 decimal places.
+    const roundMoney = (value: number) =>
+      Math.round((value + Number.EPSILON) * 100) / 100;
+
+    const unitCost = roundMoney(totalCost / qty);
+
+    const previousInventoryValue =
+      previousStock * previousCostPrice;
+
+    const newStock = previousStock + qty;
+
+    const newInventoryValue =
+      previousInventoryValue + totalCost;
+
+    const newCostPrice = roundMoney(
+      newStock > 0 ? newInventoryValue / newStock : unitCost
+    );
+
+    const purchasedBy = req.user?.id;
+
+    if (!purchasedBy) {
+      return res.status(401).json({
+        message: "Authenticated user not found",
+      });
+    }
+
+    const transaction = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO stock_purchases (
+          product_id,
+          quantity,
+          total_cost,
+          unit_cost,
+          previous_stock,
+          previous_cost_price,
+          new_stock,
+          new_cost_price,
+          supplier_id,
+          reference,
+          notes,
+          purchased_by,
+          purchase_date
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        product.id,
+        qty,
+        totalCost,
+        unitCost,
+        previousStock,
+        previousCostPrice,
+        newStock,
+        newCostPrice,
+        supplierId,
+        typeof reference === "string" && reference.trim()
+          ? reference.trim()
+          : null,
+        typeof notes === "string" && notes.trim()
+          ? notes.trim()
+          : null,
+        purchasedBy,
+        purchase_date
+      );
+
+      db.prepare(`
+        UPDATE products
+        SET stock = ?, cost_price = ?
+        WHERE id = ?
+      `).run(newStock, newCostPrice, product.id);
+
+      db.prepare(`
+        INSERT INTO stock_movements (
+          product_id,
+          type,
+          quantity,
+          reason
+        )
+        VALUES (?, 'in', ?, ?)
+      `).run(
+        product.id,
+        qty,
+        `Wholesale purchase/restock${
+          typeof reference === "string" && reference.trim()
+            ? ` - ${reference.trim()}`
+            : ""
+        }`
+      );
+    });
+
+    transaction();
+
+    const updatedProduct = db
+      .prepare(`
+        SELECT *
+        FROM products
+        WHERE id = ?
+      `)
+      .get(product.id);
+
+    res.status(201).json({
+      message: "Stock purchase recorded successfully",
+      purchase: {
+        product_id: product.id,
+        product_name: product.name,
+        quantity: qty,
+        total_cost: totalCost,
+        unit_cost: unitCost,
+        previous_stock: previousStock,
+        previous_cost_price: previousCostPrice,
+        new_stock: newStock,
+        new_cost_price: newCostPrice,
+        supplier_id: supplierId,
+        purchase_date,
+      },
+      product: updatedProduct,
+    });
+  }
+);
+
+
+// ==========================================================
+// WHOLESALE PURCHASE / RESTOCK HISTORY
+// Admin and Manager only.
+// ==========================================================
+
+router.get(
+  "/purchases/history",
+  authorizeRoles("admin", "manager"),
+  (_req, res) => {
+    const purchases = db
+      .prepare(`
+        SELECT
+          sp.id,
+          sp.product_id,
+          p.name AS product_name,
+          sp.quantity,
+          sp.total_cost,
+          sp.unit_cost,
+          sp.previous_stock,
+          sp.previous_cost_price,
+          sp.new_stock,
+          sp.new_cost_price,
+          sp.supplier_id,
+          s.name AS supplier_name,
+          sp.reference,
+          sp.notes,
+          sp.purchased_by,
+          u.name AS purchased_by_name,
+          sp.purchase_date,
+          sp.created_at
+        FROM stock_purchases sp
+        INNER JOIN products p
+          ON p.id = sp.product_id
+        LEFT JOIN users u
+          ON u.id = sp.purchased_by
+        LEFT JOIN suppliers s
+          ON s.id = sp.supplier_id
+        ORDER BY sp.purchase_date DESC, sp.id DESC
+      `)
+      .all();
+
+    res.json(purchases);
+  }
+);
+
+
 router.get("/stock/history", authorizeRoles("admin", "manager"), (req, res) => {
   const movements = db
     .prepare(`

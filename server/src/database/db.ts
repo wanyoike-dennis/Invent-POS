@@ -154,6 +154,61 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_expenses_category
     ON expenses(category);
+
+  -- ==========================================================
+  -- SUPPLIERS
+  -- ==========================================================
+
+  CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact_person TEXT,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_suppliers_name
+    ON suppliers(name);
+
+  CREATE INDEX IF NOT EXISTS idx_suppliers_phone
+    ON suppliers(phone);
+
+  -- ==========================================================
+  -- STOCK PURCHASES / WHOLESALE RESTOCKING
+  -- ==========================================================
+
+  CREATE TABLE IF NOT EXISTS stock_purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    total_cost REAL NOT NULL,
+    unit_cost REAL NOT NULL,
+    previous_stock INTEGER NOT NULL,
+    previous_cost_price REAL NOT NULL,
+    new_stock INTEGER NOT NULL,
+    new_cost_price REAL NOT NULL,
+    supplier_id INTEGER,
+    reference TEXT,
+    notes TEXT,
+    purchased_by INTEGER,
+    purchase_date DATE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (product_id)
+      REFERENCES products(id),
+
+    FOREIGN KEY (purchased_by)
+      REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_stock_purchases_product
+    ON stock_purchases(product_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_purchases_date
+    ON stock_purchases(purchase_date);
 `);
 
 // ==========================================================
