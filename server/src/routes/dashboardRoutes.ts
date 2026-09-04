@@ -23,8 +23,12 @@ router.get("/", (req: AuthRequest, res) => {
           COALESCE(SUM(total), 0) AS gross_sales,
           COUNT(*) AS transactions
         FROM sales
-        WHERE DATE(created_at, 'localtime') =
-              DATE('now', 'localtime')
+        WHERE DATE(
+                COALESCE(
+                  sale_date,
+                  DATE(created_at, 'localtime')
+                )
+              ) = DATE('now', 'localtime')
           ${isCashier ? "AND sold_by = ?" : ""}
       `)
       .get(...(isCashier ? [userId] : [])) as {
@@ -86,8 +90,12 @@ router.get("/", (req: AuthRequest, res) => {
         FROM sale_items si
         INNER JOIN sales s
           ON s.id = si.sale_id
-        WHERE DATE(s.created_at, 'localtime') =
-              DATE('now', 'localtime')
+        WHERE DATE(
+                COALESCE(
+                  s.sale_date,
+                  DATE(s.created_at, 'localtime')
+                )
+              ) = DATE('now', 'localtime')
           ${isCashier ? "AND s.sold_by = ?" : ""}
       `)
       .get(...(isCashier ? [userId] : [])) as {
@@ -213,8 +221,10 @@ router.get("/", (req: AuthRequest, res) => {
               SELECT SUM(s.total)
               FROM sales s
               WHERE DATE(
-                s.created_at,
-                'localtime'
+                COALESCE(
+                  s.sale_date,
+                  DATE(s.created_at, 'localtime')
+                )
               ) = dates.day
                 ${isCashier ? "AND s.sold_by = ?" : ""}
             ),
@@ -242,8 +252,10 @@ router.get("/", (req: AuthRequest, res) => {
               INNER JOIN sales s2
                 ON s2.id = si.sale_id
               WHERE DATE(
-                s2.created_at,
-                'localtime'
+                COALESCE(
+                  s2.sale_date,
+                  DATE(s2.created_at, 'localtime')
+                )
               ) = dates.day
                 ${isCashier ? "AND s2.sold_by = ?" : ""}
             ),
@@ -344,6 +356,11 @@ router.get("/", (req: AuthRequest, res) => {
           s.receipt_number,
           s.total,
           s.payment_method,
+          s.cash_amount,
+          s.mpesa_amount,
+          s.mpesa_code,
+          s.sale_date,
+          s.is_backdated,
           s.created_at,
 
           users.name AS sold_by_name,

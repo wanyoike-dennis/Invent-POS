@@ -177,6 +177,30 @@ db.exec(`
     ON suppliers(phone);
 
   -- ==========================================================
+  -- CUSTOMERS
+  -- ==========================================================
+
+  CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    phone TEXT UNIQUE,
+    email TEXT,
+    address TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_customers_name
+    ON customers(name);
+
+  CREATE INDEX IF NOT EXISTS idx_customers_phone
+    ON customers(phone);
+
+  CREATE INDEX IF NOT EXISTS idx_customers_email
+    ON customers(email);
+
+  -- ==========================================================
   -- STOCK PURCHASES / WHOLESALE RESTOCKING
   -- ==========================================================
 
@@ -240,14 +264,128 @@ if (!saleItemColumns.some((column) => column.name === "cost_price")) {
   `);
 }
 
+// ==========================================================
+// SALE DATE / BACKDATED SALE MIGRATION
+// Adds business sale dates without changing created_at.
+// ==========================================================
+
+const saleColumns = db
+  .prepare("PRAGMA table_info(sales)")
+  .all() as { name: string }[];
+
+if (!saleColumns.some((column) => column.name === "sale_date")) {
+  db.exec(`
+    ALTER TABLE sales
+    ADD COLUMN sale_date DATE
+  `);
+
+  db.exec(`
+    UPDATE sales
+    SET sale_date = DATE(created_at)
+    WHERE sale_date IS NULL
+  `);
+}
+
+if (!saleColumns.some((column) => column.name === "is_backdated")) {
+  db.exec(`
+    ALTER TABLE sales
+    ADD COLUMN is_backdated INTEGER NOT NULL DEFAULT 0
+  `);
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_sales_sale_date
+  ON sales(sale_date)
+`);
+
+// ==========================================================
+// SPLIT PAYMENT MIGRATION
+// Stores the actual Cash / M-Pesa contribution for each sale.
+// Existing single-method sales are backfilled automatically.
+// ==========================================================
+
+const splitPaymentSaleColumns = db
+  .prepare("PRAGMA table_info(sales)")
+  .all() as { name: string }[];
+
+if (
+  !splitPaymentSaleColumns.some(
+    (column) => column.name === "cash_amount"
+  )
+) {
+  db.exec(`
+    ALTER TABLE sales
+    ADD COLUMN cash_amount REAL NOT NULL DEFAULT 0
+  `);
+}
+
+if (
+  !splitPaymentSaleColumns.some(
+    (column) => column.name === "mpesa_amount"
+  )
+) {
+  db.exec(`
+    ALTER TABLE sales
+    ADD COLUMN mpesa_amount REAL NOT NULL DEFAULT 0
+  `);
+}
+
+// Backfill existing sales without changing their totals.
+// For Cash sales, amount_paid may include change, so only the sale total
+// belongs to the Cash payment allocation.
+db.exec(`
+  UPDATE sales
+  SET cash_amount =
+    CASE
+      WHEN payment_method = 'Cash' THEN total
+      ELSE 0
+    END
+  WHERE cash_amount = 0
+    AND mpesa_amount = 0
+`);
+
+db.exec(`
+  UPDATE sales
+  SET mpesa_amount =
+    CASE
+      WHEN payment_method = 'M-Pesa' THEN total
+      ELSE 0
+    END
+  WHERE cash_amount = 0
+    AND mpesa_amount = 0
+`);
+
+// ==========================================================
+// CUSTOMER / SALES LINK MIGRATION
+// Customer selection is optional; NULL means Walk-in Customer.
+// ==========================================================
+
+const customerSaleColumns = db
+  .prepare("PRAGMA table_info(sales)")
+  .all() as { name: string }[];
+
+if (
+  !customerSaleColumns.some(
+    (column) => column.name === "customer_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE sales
+    ADD COLUMN customer_id INTEGER
+      REFERENCES customers(id)
+  `);
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_sales_customer
+  ON sales(customer_id)
+`);
+
 const insertCategory = db.prepare(`
   INSERT OR IGNORE INTO categories (name)
   VALUES (?)
 `);
 
-insertCategory.run("Computer Accessories");
-insertCategory.run("Cables");
-insertCategory.run("Monitors");
-insertCategory.run("Storage devices");
+
 
 export default db;

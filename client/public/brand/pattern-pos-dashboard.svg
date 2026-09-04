@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 600" width="1200" height="600" role="img">
+<title>Invent POS transaction grid pattern</title>
+  <rect width="1200" height="600" fill="#071827"/>
+  <g fill="none" stroke="#18C8E8" stroke-width="2" opacity="0.16">
+    <rect x="80" y="90" width="250" height="150" rx="18"/><rect x="390" y="160" width="260" height="170" rx="18"/>
+    <rect x="720" y="70" width="390" height="190" rx="18"/><rect x="120" y="350" width="360" height="170" rx="18"/>
+    <rect x="560" y="385" width="220" height="120" rx="18"/><rect x="850" y="335" width="270" height="170" rx="18"/>
+  </g>
+  <g opacity="0.28">
+    <rect x="112" y="125" width="120" height="14" rx="7" fill="#18C8E8"/><rect x="112" y="158" width="175" height="10" rx="5" fill="#FFFFFF"/>
+    <rect x="425" y="200" width="170" height="18" rx="9" fill="#246BFD"/><rect x="425" y="242" width="105" height="48" rx="10" fill="#19B56B"/>
+    <rect x="755" y="112" width="200" height="16" rx="8" fill="#FFFFFF"/><rect x="755" y="150" width="310" height="12" rx="6" fill="#18C8E8"/>
+  </g>
+</svg>

@@ -285,7 +285,7 @@ function Inventory() {
     const cost = Number(totalCost);
 
     if (!Number.isInteger(qty) || qty <= 0) {
-      alert("Quantity received must be a positive whole number");
+      alert("Sellable units received must be a positive whole number");
       return;
     }
 
@@ -493,7 +493,7 @@ function Inventory() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">
-                    Quantity Received
+                    Sellable Units Received
                   </label>
                   <input
                     type="number"
@@ -505,6 +505,10 @@ function Inventory() {
                     placeholder="e.g. 20"
                     className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  <p className="mt-1.5 text-xs leading-5 text-slate-500">
+                    Enter the number of individual units you will sell, not the number
+                    of cartons, boxes, packs or tins purchased.
+                  </p>
                 </div>
 
                 <div>

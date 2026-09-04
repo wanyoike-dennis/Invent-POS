@@ -61,9 +61,7 @@ function Products() {
   const [newProduct, setNewProduct] = useState({
     name: "",
     category: "",
-    cost_price: "",
     price: "",
-    stock: "",
   });
 
   const fetchCategories = async () => {
@@ -105,9 +103,7 @@ function Products() {
   setNewProduct({
     name: "",
     category: "",
-    cost_price: "",
     price: "",
-    stock: "",
   });
 };
 const handleAddProduct = async (
@@ -122,9 +118,12 @@ const handleAddProduct = async (
   const productData = {
     name: newProduct.name.trim(),
     category: newProduct.category,
-    cost_price: Number(newProduct.cost_price),
     price: Number(newProduct.price),
-    stock: Number(newProduct.stock),
+
+    // Stock and cost are controlled from Inventory.
+    // New products start at zero; edits preserve existing values.
+    cost_price: editingProduct ? Number(editingProduct.cost_price) : 0,
+    stock: editingProduct ? Number(editingProduct.stock) : 0,
   };
 
   try {
@@ -166,7 +165,6 @@ const handleAddProduct = async (
       name: "",
       category: "",
       price: "",
-      stock: "",
     });
 
     setEditingProduct(null);
@@ -187,9 +185,7 @@ const handleEditProduct = (product: Product) => {
   setNewProduct({
     name: product.name,
     category: product.category,
-    cost_price: product.cost_price.toString(),
     price: product.price.toString(),
-    stock: product.stock.toString(),
   });
 
   setShowForm(true);
@@ -344,7 +340,6 @@ const handleDeleteCategory = async (id: number) => {
                 name: "",
                 category: "",
                 price: "",
-                stock: "",
               });
 
               setShowForm(true);
@@ -434,29 +429,6 @@ const handleDeleteCategory = async (id: number) => {
                 </select>
               </div>
 
-              {/* Cost price */}
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Cost Price / Buying Price
-                </label>
-
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  step="0.01"
-                  value={newProduct.cost_price}
-                  onChange={(e) =>
-                    setNewProduct({
-                      ...newProduct,
-                      cost_price: e.target.value,
-                    })
-                  }
-                  placeholder="e.g. 1800"
-                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
               {/* Selling price */}
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -478,28 +450,20 @@ const handleDeleteCategory = async (id: number) => {
                   placeholder="e.g. 2500"
                   className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <p className="mt-1.5 text-xs leading-5 text-slate-500">
+                  Price charged to the customer for one sellable unit.
+                </p>
               </div>
 
-              {/* Stock */}
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Opening Stock
-                </label>
-
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  value={newProduct.stock}
-                  onChange={(e) =>
-                    setNewProduct({
-                      ...newProduct,
-                      stock: e.target.value,
-                    })
-                  }
-                  placeholder="e.g. 10"
-                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
-                />
+              <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-4">
+                <p className="text-sm font-medium text-slate-800">
+                  Stock and buying cost are managed from Inventory
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {editingProduct
+                    ? "This edit will keep the current stock and average cost unchanged. Use Inventory → Purchase / Restock for purchases or Adjust Stock for corrections."
+                    : "This product will start with 0 stock and KES 0 average cost. After saving, use Inventory → Purchase / Restock to record the first stock purchase."}
+                </p>
               </div>
 
               {/* Buttons */}

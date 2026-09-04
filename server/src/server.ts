@@ -13,6 +13,7 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import reportRoutes from "./routes/reportRoutes.js";
 import expenseRoutes from "./routes/expenseRoutes.js";
 import supplierRoutes from "./routes/supplierRoutes.js";
+import customerRoutes from "./routes/customerRoutes.js";
 
 dotenv.config();
 
@@ -38,6 +39,7 @@ app.use("/api/dashboard", authenticateToken, authorizeRoles("admin", "manager", 
 app.use("/api/reports",authenticateToken,authorizeRoles("admin", "manager"),reportRoutes);
 app.use("/api/expenses",authenticateToken,authorizeRoles("admin", "manager"),expenseRoutes);
 app.use("/api/suppliers", authenticateToken, supplierRoutes);
+app.use("/api/customers", authenticateToken, customerRoutes);
 
 
 const PORT = process.env.PORT || 5000;

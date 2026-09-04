@@ -147,10 +147,10 @@ const handleLogout = () => {
                 to={item.path}
                 onClick={closeSidebar}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+                  `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                     isActive
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      ? "bg-[#246BFD] text-white shadow-sm"
+                      : "text-slate-300 hover:bg-white/[0.07] hover:text-white"
                   }`
                 }
               >
@@ -168,7 +168,7 @@ const handleLogout = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen bg-[#F5F8FA]">
 
       {/* Mobile background overlay */}
       {sidebarOpen && (
@@ -180,7 +180,7 @@ const handleLogout = () => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-slate-900 text-white transition-transform duration-300 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-[#071827] text-white transition-transform duration-300 lg:translate-x-0 ${
           sidebarOpen
             ? "translate-x-0"
             : "-translate-x-full"
@@ -188,23 +188,15 @@ const handleLogout = () => {
       >
 
         {/* Logo */}
-        <div className="flex h-20 items-center justify-between border-b border-slate-800 px-5">
+        <div className="flex h-20 items-center justify-between border-b border-white/10 px-5">
 
           <div className="flex items-center gap-3">
 
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 font-bold text-white">
-              IP
-            </div>
-
-            <div>
-              <h1 className="text-lg font-bold">
-                Invent POS
-              </h1>
-
-              <p className="text-xs text-slate-400">
-                Business Management
-              </p>
-            </div>
+            <img
+              src="/brand/invent-pos-logo-reversed-transparent.svg"
+              alt="Invent POS"
+              className="h-11 w-auto max-w-[168px]"
+            />
 
           </div>
 
@@ -212,7 +204,7 @@ const handleLogout = () => {
           <button
             type="button"
             onClick={closeSidebar}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden"
+            className="rounded-xl p-2 text-slate-400 transition hover:bg-white/[0.07] hover:text-white lg:hidden"
           >
             <X size={20} />
           </button>
@@ -245,11 +237,11 @@ const handleLogout = () => {
         </nav>
 
         {/* User / Logout */}
-        <div className="border-t border-slate-800 p-4">
+        <div className="border-t border-white/10 p-4">
 
-          <div className="mb-3 flex items-center gap-3 rounded-lg bg-slate-800/60 p-3">
+          <div className="mb-3 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.06] p-3">
 
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#246BFD] text-sm font-semibold">
               {initials}
             </div>
 
@@ -270,7 +262,7 @@ const handleLogout = () => {
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-red-500/10 hover:text-red-400"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-300 transition hover:bg-red-500/10 hover:text-red-400"
           >
             <LogOut size={19} />
 
@@ -287,7 +279,7 @@ const handleLogout = () => {
       <div className="min-h-screen lg:pl-64">
 
         {/* Top Bar */}
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-8">
 
           {/* Left side */}
           <div className="flex items-center gap-3">
@@ -296,7 +288,7 @@ const handleLogout = () => {
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"
+              className="rounded-xl p-2 text-slate-600 transition hover:bg-[#F5F8FA] lg:hidden"
             >
               <Menu size={22} />
             </button>
@@ -319,7 +311,7 @@ const handleLogout = () => {
             {/* Notification */}
             <button
               type="button"
-              className="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+              className="relative rounded-xl p-2 text-slate-500 transition hover:bg-[#F5F8FA] hover:text-[#071827]"
             >
               <Bell size={20} />
 
@@ -334,10 +326,10 @@ const handleLogout = () => {
   <button
     type="button"
     onClick={() => setProfileOpen(!profileOpen)}
-    className="flex items-center gap-3 rounded-lg p-1.5 transition hover:bg-slate-50"
+    className="flex items-center gap-3 rounded-xl p-1.5 transition hover:bg-[#F5F8FA]"
   >
 
-    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
+    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#246BFD] text-sm font-semibold text-white">
       {initials}
     </div>
 
@@ -364,14 +356,14 @@ const handleLogout = () => {
 
   {/* Profile dropdown */}
   {profileOpen && (
-    <div className="absolute right-0 top-12 z-50 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+    <div className="absolute right-0 top-12 z-50 w-72 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_20px_60px_rgba(7,24,39,0.16)]">
 
       {/* User information */}
       <div className="border-b border-slate-200 p-4">
 
         <div className="flex items-center gap-3">
 
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 font-semibold text-white">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#246BFD] font-semibold text-white">
             {initials}
           </div>
 
@@ -390,7 +382,7 @@ const handleLogout = () => {
         </div>
 
         <div className="mt-3">
-          <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium capitalize text-blue-700">
+          <span className="inline-flex rounded-full bg-[#246BFD]/[0.08] px-2.5 py-1 text-xs font-medium capitalize text-[#246BFD] ring-1 ring-inset ring-[#246BFD]/15">
             {user?.role || "User"}
           </span>
         </div>
@@ -406,7 +398,7 @@ const handleLogout = () => {
             setProfileOpen(false);
             navigate("/settings");
           }}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-[#F5F8FA]"
         >
           <Settings size={18} />
 
@@ -416,7 +408,7 @@ const handleLogout = () => {
         <button
           type="button"
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-red-600 transition hover:bg-red-50"
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-red-600 transition hover:bg-red-50"
         >
           <LogOut size={18} />
 

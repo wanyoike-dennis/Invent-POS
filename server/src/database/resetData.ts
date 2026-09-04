@@ -3,53 +3,48 @@ import db from "./db.js";
 console.log("Resetting Invent POS test data...");
 
 const resetData = db.transaction(() => {
-  // Delete child records first
+  // Delete child records first because of foreign-key relationships
   db.prepare("DELETE FROM sales_return_items").run();
   db.prepare("DELETE FROM sales_returns").run();
-  db.prepare("DELETE FROM sale_items").run();
 
-  // Delete sales
+  db.prepare("DELETE FROM sale_items").run();
   db.prepare("DELETE FROM sales").run();
 
-  // Inventory
   db.prepare("DELETE FROM stock_movements").run();
-  db.prepare("DELETE FROM products").run();
+  db.prepare("DELETE FROM stock_purchases").run();
 
-  // Expenses
   db.prepare("DELETE FROM expenses").run();
 
-  // Categories
-  db.prepare("DELETE FROM categories").run();
+  db.prepare("DELETE FROM products").run();
+  db.prepare("DELETE FROM suppliers").run();
 
-  // Reset auto-increment IDs for cleared tables.
-  // IMPORTANT: users is deliberately excluded.
+  // Reset AUTOINCREMENT counters.
+  // USERS IS INTENTIONALLY EXCLUDED.
   const tables = [
     "sales_return_items",
     "sales_returns",
     "sale_items",
     "sales",
     "stock_movements",
-    "products",
+    "stock_purchases",
     "expenses",
-    "categories",
+    "products",
+    "suppliers",
   ];
 
-  const resetSequence = db.prepare(
-    "DELETE FROM sqlite_sequence WHERE name = ?"
-  );
-
   for (const table of tables) {
-    resetSequence.run(table);
+    db.prepare(
+      "DELETE FROM sqlite_sequence WHERE name = ?"
+    ).run(table);
   }
 });
 
 try {
   resetData();
 
-  console.log("✅ Database reset successful.");
-  console.log("✅ Users were NOT deleted.");
-  console.log("✅ Business/test records cleared.");
+  console.log("Invent POS data reset successfully.");
+  console.log("Users were NOT deleted.");
 } catch (error) {
-  console.error("❌ Database reset failed:", error);
+  console.error("Failed to reset Invent POS data:", error);
   process.exit(1);
 }

@@ -36,7 +36,7 @@ router.get("/", (req, res) => {
 
     if (startDate) {
       saleConditions.push(
-        "DATE(s.created_at, 'localtime') >= DATE(?)"
+        "DATE(COALESCE(s.sale_date, DATE(s.created_at, 'localtime'))) >= DATE(?)"
       );
 
       returnConditions.push(
@@ -54,7 +54,7 @@ router.get("/", (req, res) => {
 
     if (endDate) {
       saleConditions.push(
-        "DATE(s.created_at, 'localtime') <= DATE(?)"
+        "DATE(COALESCE(s.sale_date, DATE(s.created_at, 'localtime'))) <= DATE(?)"
       );
 
       returnConditions.push(
@@ -103,7 +103,9 @@ router.get("/", (req, res) => {
             SUM(
               CASE
                 WHEN s.payment_method = 'Cash'
-                THEN s.total
+                  THEN s.total
+                WHEN s.payment_method = 'Split'
+                  THEN s.cash_amount
                 ELSE 0
               END
             ),
@@ -114,7 +116,9 @@ router.get("/", (req, res) => {
             SUM(
               CASE
                 WHEN s.payment_method = 'M-Pesa'
-                THEN s.total
+                  THEN s.total
+                WHEN s.payment_method = 'Split'
+                  THEN s.mpesa_amount
                 ELSE 0
               END
             ),
@@ -152,7 +156,14 @@ router.get("/", (req, res) => {
             SUM(
               CASE
                 WHEN s.payment_method = 'Cash'
-                THEN sr.refund_amount
+                  THEN sr.refund_amount
+                WHEN s.payment_method = 'Split'
+                  THEN sr.refund_amount *
+                    CASE
+                      WHEN s.total > 0
+                        THEN s.cash_amount / s.total
+                      ELSE 0
+                    END
                 ELSE 0
               END
             ),
@@ -163,7 +174,14 @@ router.get("/", (req, res) => {
             SUM(
               CASE
                 WHEN s.payment_method = 'M-Pesa'
-                THEN sr.refund_amount
+                  THEN sr.refund_amount
+                WHEN s.payment_method = 'Split'
+                  THEN sr.refund_amount *
+                    CASE
+                      WHEN s.total > 0
+                        THEN s.mpesa_amount / s.total
+                      ELSE 0
+                    END
                 ELSE 0
               END
             ),
@@ -357,8 +375,10 @@ router.get("/", (req, res) => {
         WITH dates AS (
           SELECT
             DATE(
-              s.created_at,
-              'localtime'
+              COALESCE(
+                s.sale_date,
+                DATE(s.created_at, 'localtime')
+              )
             ) AS day
 
           FROM sales s
@@ -397,8 +417,10 @@ router.get("/", (req, res) => {
               FROM sales s2
 
               WHERE DATE(
-                s2.created_at,
-                'localtime'
+                COALESCE(
+                  s2.sale_date,
+                  DATE(s2.created_at, 'localtime')
+                )
               ) = dates.day
             ),
             0
@@ -429,8 +451,10 @@ router.get("/", (req, res) => {
               INNER JOIN sales s3
                 ON s3.id = si2.sale_id
               WHERE DATE(
-                s3.created_at,
-                'localtime'
+                COALESCE(
+                  s3.sale_date,
+                  DATE(s3.created_at, 'localtime')
+                )
               ) = dates.day
             ),
             0

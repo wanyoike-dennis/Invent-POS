@@ -10,6 +10,141 @@ type SaleItemInput = {
   quantity: number;
 };
 
+type PaymentMethod = "Cash" | "M-Pesa" | "Split";
+
+const preparePayment = ({
+  paymentMethod,
+  total,
+  amountPaid,
+  cashAmount,
+  mpesaAmount,
+  mpesaCode,
+}: {
+  paymentMethod: PaymentMethod;
+  total: number;
+  amountPaid?: number;
+  cashAmount?: number;
+  mpesaAmount?: number;
+  mpesaCode?: string;
+}) => {
+  const roundMoney = (value: number) =>
+    Math.round((value + Number.EPSILON) * 100) / 100;
+
+  let cash = 0;
+  let mpesa = 0;
+  let paid = 0;
+  let changeAmount = 0;
+
+  if (paymentMethod === "Cash") {
+    paid = Number(amountPaid);
+
+    if (!Number.isFinite(paid) || paid < total) {
+      throw new Error("Amount paid cannot be less than total");
+    }
+
+    changeAmount = roundMoney(paid - total);
+    cash = roundMoney(total);
+  } else if (paymentMethod === "M-Pesa") {
+    paid = Number(amountPaid);
+
+    if (!Number.isFinite(paid) || paid < total) {
+      throw new Error("M-Pesa amount cannot be less than total");
+    }
+
+    if (!mpesaCode?.trim()) {
+      throw new Error("M-Pesa transaction code is required");
+    }
+
+    mpesa = roundMoney(total);
+  } else {
+    cash = Number(cashAmount);
+    mpesa = Number(mpesaAmount);
+
+    if (
+      !Number.isFinite(cash) ||
+      !Number.isFinite(mpesa) ||
+      cash < 0 ||
+      mpesa <= 0
+    ) {
+      throw new Error("Enter valid Cash and M-Pesa amounts");
+    }
+
+    if (!mpesaCode?.trim()) {
+      throw new Error("M-Pesa transaction code is required");
+    }
+
+    paid = roundMoney(cash + mpesa);
+
+    if (paid < total) {
+      throw new Error(
+        "Cash amount plus M-Pesa amount cannot be less than total"
+      );
+    }
+
+    // M-Pesa is treated as an exact electronic payment.
+    // Any overpayment/change must therefore come from Cash.
+    const requiredCash = roundMoney(
+      Math.max(total - mpesa, 0)
+    );
+
+    if (cash < requiredCash) {
+      throw new Error(
+        "Any change on a split payment must come from the Cash portion"
+      );
+    }
+
+    changeAmount = roundMoney(paid - total);
+
+    // Store the actual amount retained as sale proceeds after cash change.
+    cash = roundMoney(cash - changeAmount);
+    mpesa = roundMoney(mpesa);
+  }
+
+  return {
+    paid: roundMoney(paid),
+    changeAmount,
+    cashAmount: cash,
+    mpesaAmount: mpesa,
+    mpesaCode:
+      paymentMethod === "M-Pesa" ||
+      paymentMethod === "Split"
+        ? mpesaCode?.trim() || null
+        : null,
+  };
+};
+
+const formatLocalDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+const parseLocalDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value
+    .split("-")
+    .map(Number);
+
+  const parsed = new Date(year, month - 1, day);
+
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  parsed.setHours(0, 0, 0, 0);
+
+  return parsed;
+};
+
 // ============================================================
 // GET ALL SALES
 // Refund-aware sales history
@@ -22,6 +157,8 @@ router.get("/", (req: AuthRequest, res) => {
         SELECT
           sales.*,
           users.name AS sold_by_name,
+          customers.name AS customer_name,
+          customers.phone AS customer_phone,
 
           COALESCE(
             (
@@ -36,6 +173,9 @@ router.get("/", (req: AuthRequest, res) => {
 
         LEFT JOIN users
           ON users.id = sales.sold_by
+
+        LEFT JOIN customers
+          ON customers.id = sales.customer_id
 
         ${
           req.user?.role === "cashier"
@@ -126,12 +266,18 @@ router.post("/", (req: AuthRequest, res) => {
     items,
     paymentMethod,
     amountPaid,
+    cashAmount,
+    mpesaAmount,
     mpesaCode,
+    customerId,
   } = req.body as {
     items: SaleItemInput[];
-    paymentMethod: "Cash" | "M-Pesa";
-    amountPaid: number;
+    paymentMethod: PaymentMethod;
+    amountPaid?: number;
+    cashAmount?: number;
+    mpesaAmount?: number;
     mpesaCode?: string;
+    customerId?: number | null;
   };
 
   // Validate items
@@ -144,26 +290,54 @@ router.post("/", (req: AuthRequest, res) => {
   // Validate payment method
   if (
     paymentMethod !== "Cash" &&
-    paymentMethod !== "M-Pesa"
+    paymentMethod !== "M-Pesa" &&
+    paymentMethod !== "Split"
   ) {
     return res.status(400).json({
       message: "Invalid payment method",
     });
   }
 
-  // Require M-Pesa transaction code
-  if (
-    paymentMethod === "M-Pesa" &&
-    !mpesaCode?.trim()
-  ) {
-    return res.status(400).json({
-      message: "M-Pesa transaction code is required",
-    });
-  }
-
   try {
     const createSale = db.transaction(() => {
       let total = 0;
+
+      // Customer is optional. NULL means Walk-in Customer.
+      let selectedCustomerId: number | null = null;
+      let selectedCustomer:
+        | { id: number; name: string; phone: string | null }
+        | undefined;
+
+      if (
+        customerId !== undefined &&
+        customerId !== null &&
+        customerId !== 0
+      ) {
+        const parsedCustomerId = Number(customerId);
+
+        if (
+          !Number.isInteger(parsedCustomerId) ||
+          parsedCustomerId <= 0
+        ) {
+          throw new Error("Invalid customer");
+        }
+
+        selectedCustomer = db
+          .prepare(`
+            SELECT id, name, phone
+            FROM customers
+            WHERE id = ?
+          `)
+          .get(parsedCustomerId) as
+          | { id: number; name: string; phone: string | null }
+          | undefined;
+
+        if (!selectedCustomer) {
+          throw new Error("Customer not found");
+        }
+
+        selectedCustomerId = selectedCustomer.id;
+      }
 
       // Prepare and validate sale items
       const preparedItems = items.map((item) => {
@@ -221,36 +395,23 @@ router.post("/", (req: AuthRequest, res) => {
         };
       });
 
-      // Validate amount paid
-      const paid = Number(amountPaid);
+      // Validate and prepare payment allocation
+      const payment = preparePayment({
+        paymentMethod,
+        total,
+        amountPaid,
+        cashAmount,
+        mpesaAmount,
+        mpesaCode,
+      });
 
-      if (!Number.isFinite(paid)) {
-        throw new Error("Invalid amount paid");
-      }
-
-      if (
-        paymentMethod === "Cash" &&
-        paid < total
-      ) {
-        throw new Error(
-          "Amount paid cannot be less than total"
-        );
-      }
-
-      if (
-        paymentMethod === "M-Pesa" &&
-        paid < total
-      ) {
-        throw new Error(
-          "M-Pesa amount cannot be less than total"
-        );
-      }
-
-      // Calculate change
-      const changeAmount =
-        paymentMethod === "Cash"
-          ? paid - total
-          : 0;
+      const {
+        paid,
+        changeAmount,
+        cashAmount: allocatedCash,
+        mpesaAmount: allocatedMpesa,
+        mpesaCode: storedMpesaCode,
+      } = payment;
 
       // Generate receipt number
       const receiptNumber =
@@ -266,9 +427,14 @@ router.post("/", (req: AuthRequest, res) => {
             amount_paid,
             change_amount,
             mpesa_code,
-            sold_by
+            sold_by,
+            sale_date,
+            is_backdated,
+            cash_amount,
+            mpesa_amount,
+            customer_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           receiptNumber,
@@ -276,10 +442,13 @@ router.post("/", (req: AuthRequest, res) => {
           paymentMethod,
           paid,
           changeAmount,
-          paymentMethod === "M-Pesa"
-            ? mpesaCode?.trim()
-            : null,
-          req.user?.id || null
+          storedMpesaCode,
+          req.user?.id || null,
+          formatLocalDate(new Date()),
+          0,
+          allocatedCash,
+          allocatedMpesa,
+          selectedCustomerId
         );
 
       const saleId =
@@ -347,6 +516,19 @@ router.post("/", (req: AuthRequest, res) => {
         paymentMethod,
         amountPaid: paid,
         changeAmount,
+        cashAmount: allocatedCash,
+        mpesaAmount: allocatedMpesa,
+        mpesaCode: storedMpesaCode,
+        customerId: selectedCustomerId,
+        customer: selectedCustomer
+          ? {
+              id: selectedCustomer.id,
+              name: selectedCustomer.name,
+              phone: selectedCustomer.phone,
+            }
+          : null,
+        saleDate: formatLocalDate(new Date()),
+        isBackdated: false,
       };
     });
 
@@ -368,6 +550,338 @@ router.post("/", (req: AuthRequest, res) => {
     });
   }
 });
+
+// ============================================================
+// CREATE PAST SALE
+// Admin only. Sale must be 1 to 7 calendar days before today.
+// created_at remains the real record-entry timestamp.
+// ============================================================
+
+router.post(
+  "/past",
+  authorizeRoles("admin"),
+  (req: AuthRequest, res) => {
+    const {
+      items,
+      paymentMethod,
+      amountPaid,
+      cashAmount,
+      mpesaAmount,
+      mpesaCode,
+      saleDate,
+      customerId,
+    } = req.body as {
+      items: SaleItemInput[];
+      paymentMethod: PaymentMethod;
+      amountPaid?: number;
+      cashAmount?: number;
+      mpesaAmount?: number;
+      mpesaCode?: string;
+      saleDate: string;
+      customerId?: number | null;
+    };
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        message: "Past sale must contain at least one product",
+      });
+    }
+
+    if (
+      paymentMethod !== "Cash" &&
+      paymentMethod !== "M-Pesa" &&
+      paymentMethod !== "Split"
+    ) {
+      return res.status(400).json({
+        message: "Invalid payment method",
+      });
+    }
+
+    if (!saleDate) {
+      return res.status(400).json({
+        message: "Past sale date is required",
+      });
+    }
+
+    const parsedSaleDate = parseLocalDate(saleDate);
+
+    if (!parsedSaleDate) {
+      return res.status(400).json({
+        message: "Invalid past sale date",
+      });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const differenceInDays = Math.round(
+      (today.getTime() - parsedSaleDate.getTime()) /
+        86_400_000
+    );
+
+    if (differenceInDays <= 0) {
+      return res.status(400).json({
+        message:
+          "Past sales must use a date before today. Use normal checkout for today's sales.",
+      });
+    }
+
+    if (differenceInDays > 7) {
+      return res.status(400).json({
+        message:
+          "Past sales can only be recorded for the previous 7 calendar days.",
+      });
+    }
+
+    const backdatedSaleDate =
+      formatLocalDate(parsedSaleDate);
+
+    try {
+      const createPastSale = db.transaction(() => {
+        let total = 0;
+
+        // Customer is optional. NULL means Walk-in Customer.
+        let selectedCustomerId: number | null = null;
+        let selectedCustomer:
+          | { id: number; name: string; phone: string | null }
+          | undefined;
+
+        if (
+          customerId !== undefined &&
+          customerId !== null &&
+          customerId !== 0
+        ) {
+          const parsedCustomerId = Number(customerId);
+
+          if (
+            !Number.isInteger(parsedCustomerId) ||
+            parsedCustomerId <= 0
+          ) {
+            throw new Error("Invalid customer");
+          }
+
+          selectedCustomer = db
+            .prepare(`
+              SELECT id, name, phone
+              FROM customers
+              WHERE id = ?
+            `)
+            .get(parsedCustomerId) as
+            | { id: number; name: string; phone: string | null }
+            | undefined;
+
+          if (!selectedCustomer) {
+            throw new Error("Customer not found");
+          }
+
+          selectedCustomerId = selectedCustomer.id;
+        }
+
+        const preparedItems = items.map((item) => {
+          const product = db
+            .prepare(`
+              SELECT
+                id,
+                name,
+                price,
+                cost_price,
+                stock
+              FROM products
+              WHERE id = ?
+            `)
+            .get(item.productId) as
+            | {
+                id: number;
+                name: string;
+                price: number;
+                cost_price: number;
+                stock: number;
+              }
+            | undefined;
+
+          if (!product) {
+            throw new Error("Product not found");
+          }
+
+          const quantity = Number(item.quantity);
+
+          if (
+            !Number.isInteger(quantity) ||
+            quantity <= 0
+          ) {
+            throw new Error(
+              `Invalid quantity for ${product.name}`
+            );
+          }
+
+          if (quantity > product.stock) {
+            throw new Error(
+              `Not enough stock for ${product.name}`
+            );
+          }
+
+          const subtotal =
+            product.price * quantity;
+
+          total += subtotal;
+
+          return {
+            ...product,
+            quantity,
+            subtotal,
+          };
+        });
+
+        const payment = preparePayment({
+          paymentMethod,
+          total,
+          amountPaid,
+          cashAmount,
+          mpesaAmount,
+          mpesaCode,
+        });
+
+        const {
+          paid,
+          changeAmount,
+          cashAmount: allocatedCash,
+          mpesaAmount: allocatedMpesa,
+          mpesaCode: storedMpesaCode,
+        } = payment;
+
+        const receiptNumber =
+          `INV-${Date.now()}`;
+
+        const saleResult = db
+          .prepare(`
+            INSERT INTO sales (
+              receipt_number,
+              total,
+              payment_method,
+              amount_paid,
+              change_amount,
+              mpesa_code,
+              sold_by,
+              sale_date,
+              is_backdated,
+              cash_amount,
+              mpesa_amount,
+              customer_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `)
+          .run(
+            receiptNumber,
+            total,
+            paymentMethod,
+            paid,
+            changeAmount,
+            storedMpesaCode,
+            req.user?.id || null,
+            backdatedSaleDate,
+            1,
+            allocatedCash,
+            allocatedMpesa,
+            selectedCustomerId
+          );
+
+        const saleId =
+          Number(saleResult.lastInsertRowid);
+
+        const insertSaleItem = db.prepare(`
+          INSERT INTO sale_items (
+            sale_id,
+            product_id,
+            product_name,
+            quantity,
+            unit_price,
+            cost_price,
+            subtotal
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const reduceStock = db.prepare(`
+          UPDATE products
+          SET stock = stock - ?
+          WHERE id = ?
+        `);
+
+        const recordStockMovement = db.prepare(`
+          INSERT INTO stock_movements (
+            product_id,
+            type,
+            quantity,
+            reason
+          )
+          VALUES (?, 'out', ?, ?)
+        `);
+
+        for (const item of preparedItems) {
+          insertSaleItem.run(
+            saleId,
+            item.id,
+            item.name,
+            item.quantity,
+            item.price,
+            Number(item.cost_price || 0),
+            item.subtotal
+          );
+
+          reduceStock.run(
+            item.quantity,
+            item.id
+          );
+
+          recordStockMovement.run(
+            item.id,
+            item.quantity,
+            `Backdated sale ${receiptNumber} (${backdatedSaleDate})`
+          );
+        }
+
+        return {
+          id: saleId,
+          receiptNumber,
+          total,
+          paymentMethod,
+          amountPaid: paid,
+          changeAmount,
+          cashAmount: allocatedCash,
+          mpesaAmount: allocatedMpesa,
+          mpesaCode: storedMpesaCode,
+          customerId: selectedCustomerId,
+          customer: selectedCustomer
+            ? {
+                id: selectedCustomer.id,
+                name: selectedCustomer.name,
+                phone: selectedCustomer.phone,
+              }
+            : null,
+          saleDate: backdatedSaleDate,
+          isBackdated: true,
+        };
+      });
+
+      const sale = createPastSale();
+
+      return res.status(201).json({
+        message: "Past sale recorded successfully",
+        sale,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to record past sale";
+
+      return res.status(400).json({
+        message,
+      });
+    }
+  }
+);
+
 
 // ============================================================
 // GET RETURNS HISTORY
@@ -439,10 +953,16 @@ router.get("/:id", (req: AuthRequest, res) => {
       .prepare(`
         SELECT
           sales.*,
-          users.name AS sold_by_name
+          users.name AS sold_by_name,
+          customers.name AS customer_name,
+          customers.phone AS customer_phone,
+          customers.email AS customer_email,
+          customers.address AS customer_address
         FROM sales
         LEFT JOIN users
           ON users.id = sales.sold_by
+        LEFT JOIN customers
+          ON customers.id = sales.customer_id
         WHERE sales.id = ?
           ${
             req.user?.role === "cashier"
