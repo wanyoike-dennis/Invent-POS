@@ -13,8 +13,42 @@ const router = express.Router();
 const JWT_SECRET =
   process.env.JWT_SECRET || "invent-pos-secret-key";
 
+
+const createOrganizationSlug = (name: string) => {
+  const base =
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "organization";
+
+  let slug = base;
+  let suffix = 2;
+
+  while (
+    db
+      .prepare(`
+        SELECT id
+        FROM organizations
+        WHERE slug = ?
+      `)
+      .get(slug)
+  ) {
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  return slug;
+};
+
 router.post("/register", async (req, res) => {
-  const { name, email, password } = req.body;
+  const {
+    name,
+    email,
+    password,
+    organizationName,
+    businessName,
+  } = req.body;
 
   if (!name || !email || !password) {
     return res.status(400).json({
@@ -22,10 +56,32 @@ router.post("/register", async (req, res) => {
     });
   }
 
+  if (String(password).length < 6) {
+    return res.status(400).json({
+      message: "Password must be at least 6 characters",
+    });
+  }
+
+  const normalizedEmail = String(email)
+    .trim()
+    .toLowerCase();
+
+  const requestedOrganizationName = String(
+    organizationName ||
+      businessName ||
+      `${String(name).trim()}'s Business`
+  ).trim();
+
+  if (!requestedOrganizationName) {
+    return res.status(400).json({
+      message: "Organization name is required",
+    });
+  }
+
   try {
     const existingUser = db
-      .prepare("SELECT * FROM users WHERE email = ?")
-      .get(email.trim().toLowerCase());
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .get(normalizedEmail);
 
     if (existingUser) {
       return res.status(400).json({
@@ -33,34 +89,76 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(
+      String(password),
+      10
+    );
 
-    const result = db
-      .prepare(`
-        INSERT INTO users (
-          name,
-          email,
-          password,
-          role
-        )
-        VALUES (?, ?, ?, ?)
-      `)
-      .run(
-        name.trim(),
-        email.trim().toLowerCase(),
-        hashedPassword,
-        "admin"
-      );
+    const createOrganizationAndAdmin =
+      db.transaction(() => {
+        const slug = createOrganizationSlug(
+          requestedOrganizationName
+        );
 
-    res.status(201).json({
-      message: "User registered successfully",
-      userId: result.lastInsertRowid,
+        const organizationResult = db
+          .prepare(`
+            INSERT INTO organizations (
+              name,
+              slug,
+              currency
+            )
+            VALUES (?, ?, 'KES')
+          `)
+          .run(
+            requestedOrganizationName,
+            slug
+          );
+
+        const organizationId = Number(
+          organizationResult.lastInsertRowid
+        );
+
+        const userResult = db
+          .prepare(`
+            INSERT INTO users (
+              name,
+              email,
+              password,
+              role,
+              organization_id
+            )
+            VALUES (?, ?, ?, ?, ?)
+          `)
+          .run(
+            String(name).trim(),
+            normalizedEmail,
+            hashedPassword,
+            "admin",
+            organizationId
+          );
+
+        return {
+          userId: Number(userResult.lastInsertRowid),
+          organizationId,
+          organizationName:
+            requestedOrganizationName,
+          organizationSlug: slug,
+        };
+      });
+
+    const created = createOrganizationAndAdmin();
+
+    return res.status(201).json({
+      message:
+        "Organization and admin user registered successfully",
+      ...created,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Register organization error:", error);
 
-    res.status(500).json({
-      message: "Failed to register user",
+    return res.status(500).json({
+      message:
+        "Failed to register organization",
     });
   }
 });
@@ -120,21 +218,33 @@ router.post(
         10
       );
 
+      const organizationId =
+        req.user?.organizationId;
+
+      if (!organizationId) {
+        return res.status(400).json({
+          message:
+            "Organization context is missing. Please log in again.",
+        });
+      }
+
       const result = db
         .prepare(`
           INSERT INTO users (
             name,
             email,
             password,
-            role
+            role,
+            organization_id
           )
-          VALUES (?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?)
         `)
         .run(
           String(name).trim(),
           normalizedEmail,
           hashedPassword,
-          normalizedRole
+          normalizedRole,
+          organizationId
         );
 
       const createdUser = db
@@ -144,6 +254,7 @@ router.post(
             name,
             email,
             role,
+            organization_id,
             created_at
           FROM users
           WHERE id = ?
@@ -174,7 +285,22 @@ router.post("/login", async (req, res) => {
   }
 
   const user = db
-    .prepare("SELECT * FROM users WHERE email = ?")
+    .prepare(`
+      SELECT
+        users.id,
+        users.name,
+        users.email,
+        users.password,
+        users.role,
+        users.organization_id,
+        organizations.name AS organization_name,
+        organizations.slug AS organization_slug,
+        organizations.currency AS organization_currency
+      FROM users
+      LEFT JOIN organizations
+        ON organizations.id = users.organization_id
+      WHERE users.email = ?
+    `)
     .get(email.trim().toLowerCase()) as
     | {
         id: number;
@@ -182,12 +308,23 @@ router.post("/login", async (req, res) => {
         email: string;
         password: string;
         role: string;
+        organization_id: number | null;
+        organization_name: string | null;
+        organization_slug: string | null;
+        organization_currency: string | null;
       }
     | undefined;
 
   if (!user) {
     return res.status(401).json({
       message: "Invalid email or password",
+    });
+  }
+
+  if (!user.organization_id) {
+    return res.status(403).json({
+      message:
+        "This user is not assigned to an organization.",
     });
   }
 
@@ -208,6 +345,7 @@ router.post("/login", async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      organizationId: user.organization_id,
     },
     JWT_SECRET,
     {
@@ -223,6 +361,18 @@ router.post("/login", async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      organizationId: user.organization_id,
+      organization: {
+        id: user.organization_id,
+        name:
+          user.organization_name ||
+          "Organization",
+        slug:
+          user.organization_slug || "",
+        currency:
+          user.organization_currency ||
+          "KES",
+      },
     },
   });
 });

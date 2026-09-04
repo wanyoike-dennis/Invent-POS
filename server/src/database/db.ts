@@ -5,6 +5,22 @@ const db = new Database("invent-pos.db");
 db.pragma("journal_mode = WAL");
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS organizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    receipt_footer TEXT,
+    currency TEXT NOT NULL DEFAULT 'KES',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_organizations_slug
+    ON organizations(slug);
+
   CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -38,7 +54,10 @@ db.exec(`
     email TEXT NOT NULL UNIQUE,
     password TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    organization_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id)
   );
 
   CREATE TABLE IF NOT EXISTS sales (
@@ -233,6 +252,67 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_stock_purchases_date
     ON stock_purchases(purchase_date);
+`);
+
+// ==========================================================
+// ORGANIZATION / MULTI-TENANT FOUNDATION
+// Existing installations are assigned to one default organization.
+// Authentication will use organization_id from the logged-in user.
+// ==========================================================
+
+db.exec(`
+  INSERT OR IGNORE INTO organizations (
+    name,
+    slug,
+    currency
+  )
+  VALUES (
+    'Invent Solutions',
+    'invent-solutions',
+    'KES'
+  )
+`);
+
+const defaultOrganization = db
+  .prepare(`
+    SELECT id
+    FROM organizations
+    WHERE slug = 'invent-solutions'
+    LIMIT 1
+  `)
+  .get() as { id: number } | undefined;
+
+if (!defaultOrganization) {
+  throw new Error(
+    "Failed to create or find the default organization"
+  );
+}
+
+const userColumns = db
+  .prepare("PRAGMA table_info(users)")
+  .all() as { name: string }[];
+
+if (
+  !userColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE users
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+db.prepare(`
+  UPDATE users
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_users_organization
+  ON users(organization_id)
 `);
 
 // ==========================================================

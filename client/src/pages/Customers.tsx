@@ -9,6 +9,10 @@ import {
   Trash2,
   UserRound,
   Users,
+  Eye,
+  ReceiptText,
+  WalletCards,
+  CalendarDays,
 } from "lucide-react";
 import { apiFetch } from "../services/api";
 
@@ -32,6 +36,36 @@ type CustomerSummary = {
 type CustomerResponse = {
   summary: CustomerSummary;
   customers: Customer[];
+};
+
+type CustomerSale = {
+  id: number;
+  receipt_number: string;
+  total: number;
+  refunded_amount: number;
+  net_total: number;
+  payment_method: string;
+  cash_amount: number;
+  mpesa_amount: number;
+  mpesa_code: string | null;
+  sale_date: string | null;
+  is_backdated: number;
+  created_at: string;
+  sold_by_name: string | null;
+};
+
+type CustomerStats = {
+  transactions: number;
+  gross_spent: number;
+  refunds: number;
+  net_spent: number;
+  last_purchase_date: string | null;
+};
+
+type CustomerDetailsResponse = {
+  customer: Customer;
+  stats: CustomerStats;
+  sales: CustomerSale[];
 };
 
 type CustomerForm = {
@@ -95,6 +129,18 @@ function Customers() {
 
   const [deletingCustomer, setDeletingCustomer] =
     useState(false);
+
+  const [customerDetails, setCustomerDetails] =
+    useState<CustomerDetailsResponse | null>(null);
+
+  const [showDetailsModal, setShowDetailsModal] =
+    useState(false);
+
+  const [loadingDetails, setLoadingDetails] =
+    useState(false);
+
+  const [detailsError, setDetailsError] =
+    useState("");
 
   const fetchCustomers = async () => {
     try {
@@ -302,6 +348,51 @@ function Customers() {
       setDeletingCustomer(false);
     }
   };
+
+  const openCustomerDetails = async (customer: Customer) => {
+    try {
+      setShowDetailsModal(true);
+      setLoadingDetails(true);
+      setDetailsError("");
+      setCustomerDetails(null);
+
+      const response = await apiFetch(
+        `/api/customers/${customer.id}`
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Failed to load customer details"
+        );
+      }
+
+      setCustomerDetails(data as CustomerDetailsResponse);
+    } catch (error) {
+      console.error("Customer details error:", error);
+
+      setDetailsError(
+        error instanceof Error
+          ? error.message
+          : "Could not load customer details."
+      );
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  const closeDetailsModal = () => {
+    setShowDetailsModal(false);
+    setCustomerDetails(null);
+    setDetailsError("");
+  };
+
+  const formatMoney = (value: number) =>
+    `KES ${Number(value || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
 
   const formatDate = (value: string) => {
     if (!value) {
@@ -516,9 +607,14 @@ function Customers() {
                           </div>
 
                           <div className="min-w-0">
-                            <p className="font-semibold text-[#071827]">
+                            <button
+                              type="button"
+                              onClick={() => openCustomerDetails(customer)}
+                              className="text-left font-semibold text-[#071827] transition hover:text-[#246BFD]"
+                              title="View customer profile"
+                            >
                               {customer.name}
-                            </p>
+                            </button>
 
                             {customer.notes && (
                               <p className="mt-1 max-w-xs truncate text-xs text-slate-500">
@@ -575,6 +671,17 @@ function Customers() {
                           <button
                             type="button"
                             onClick={() =>
+                              openCustomerDetails(customer)
+                            }
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-slate-600 transition hover:border-[#246BFD]/40 hover:bg-[#246BFD]/[0.05] hover:text-[#246BFD]"
+                            title="View customer profile"
+                          >
+                            <Eye size={16} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
                               openEditCustomerModal(
                                 customer
                               )
@@ -623,9 +730,13 @@ function Customers() {
                       </div>
 
                       <div className="min-w-0">
-                        <p className="font-semibold text-[#071827]">
+                        <button
+                          type="button"
+                          onClick={() => openCustomerDetails(customer)}
+                          className="text-left font-semibold text-[#071827] transition hover:text-[#246BFD]"
+                        >
                           {customer.name}
-                        </p>
+                        </button>
 
                         <p className="mt-1 text-xs text-slate-500">
                           Added {formatDate(customer.created_at)}
@@ -634,6 +745,17 @@ function Customers() {
                     </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openCustomerDetails(customer)
+                        }
+                        className="rounded-lg border border-slate-300 p-2 text-slate-600"
+                        title="View customer profile"
+                      >
+                        <Eye size={16} />
+                      </button>
+
                       <button
                         type="button"
                         onClick={() =>
@@ -697,6 +819,246 @@ function Customers() {
           </>
         )}
       </div>
+
+      {/* CUSTOMER DETAILS / PURCHASE HISTORY */}
+      {showDetailsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 px-4 py-6">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-200 bg-white p-5">
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#18C8E8]">
+                  Customer Profile
+                </p>
+                <h2 className="text-xl font-semibold text-[#071827]">
+                  {customerDetails?.customer.name || "Customer Details"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Contact information and complete linked purchase history.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeDetailsModal}
+                className="text-2xl text-slate-400 transition hover:text-slate-700"
+              >
+                ×
+              </button>
+            </div>
+
+            {loadingDetails ? (
+              <div className="p-12 text-center text-sm text-slate-500">
+                Loading customer profile...
+              </div>
+            ) : detailsError ? (
+              <div className="p-6">
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {detailsError}
+                </div>
+              </div>
+            ) : customerDetails ? (
+              <div className="space-y-6 p-5">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_2fr]">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#246BFD]/10 text-lg font-bold text-[#246BFD]">
+                        {customerDetails.customer.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-[#071827]">
+                          {customerDetails.customer.name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Customer since {formatDate(customerDetails.customer.created_at)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 space-y-3 text-sm text-slate-600">
+                      <div className="flex items-center gap-2">
+                        <Phone size={15} className="text-slate-400" />
+                        {customerDetails.customer.phone || "No phone"}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Mail size={15} className="text-slate-400" />
+                        <span className="truncate">
+                          {customerDetails.customer.email || "No email"}
+                        </span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <MapPin size={15} className="mt-0.5 text-slate-400" />
+                        {customerDetails.customer.address || "No location"}
+                      </div>
+                    </div>
+
+                    {customerDetails.customer.notes && (
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600">
+                        {customerDetails.customer.notes}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <ReceiptText size={18} className="text-[#246BFD]" />
+                      <p className="mt-3 text-xs text-slate-500">Purchases</p>
+                      <p className="mt-1 text-xl font-bold text-[#071827]">
+                        {customerDetails.stats.transactions}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <WalletCards size={18} className="text-emerald-600" />
+                      <p className="mt-3 text-xs text-slate-500">Gross Spent</p>
+                      <p className="mt-1 text-lg font-bold text-[#071827]">
+                        {formatMoney(customerDetails.stats.gross_spent)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <WalletCards size={18} className="text-red-500" />
+                      <p className="mt-3 text-xs text-slate-500">Refunds</p>
+                      <p className="mt-1 text-lg font-bold text-red-600">
+                        {formatMoney(customerDetails.stats.refunds)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <WalletCards size={18} className="text-[#18C8E8]" />
+                      <p className="mt-3 text-xs text-slate-500">Net Spent</p>
+                      <p className="mt-1 text-lg font-bold text-[#071827]">
+                        {formatMoney(customerDetails.stats.net_spent)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <CalendarDays size={17} className="text-slate-400" />
+                  <span className="font-medium">Last Purchase:</span>
+                  <span>
+                    {customerDetails.stats.last_purchase_date
+                      ? formatDate(customerDetails.stats.last_purchase_date)
+                      : "No purchases yet"}
+                  </span>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-slate-200">
+                  <div className="border-b border-slate-200 bg-white px-5 py-4">
+                    <h3 className="font-semibold text-[#071827]">
+                      Purchase History
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Sales linked to this customer.
+                    </p>
+                  </div>
+
+                  {customerDetails.sales.length === 0 ? (
+                    <div className="p-10 text-center text-sm text-slate-500">
+                      This customer has no linked purchases yet.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[850px]">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Receipt
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Sale Date
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Payment
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Gross
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Refund
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Net
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Cashier
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 bg-white">
+                          {customerDetails.sales.map((sale) => (
+                            <tr key={sale.id} className="hover:bg-slate-50/70">
+                              <td className="px-4 py-4">
+                                <p className="font-semibold text-[#071827]">
+                                  {sale.receipt_number}
+                                </p>
+                                {Boolean(sale.is_backdated) && (
+                                  <span className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                                    Past Sale
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-4 text-sm text-slate-600">
+                                {formatDate(sale.sale_date || sale.created_at)}
+                              </td>
+
+                              <td className="px-4 py-4 text-sm text-slate-600">
+                                <p className="font-medium">
+                                  {sale.payment_method}
+                                </p>
+
+                                {sale.payment_method === "Split" && (
+                                  <div className="mt-1 text-xs text-slate-500">
+                                    Cash {formatMoney(sale.cash_amount)} · M-Pesa{" "}
+                                    {formatMoney(sale.mpesa_amount)}
+                                  </div>
+                                )}
+
+                                {sale.mpesa_code && (
+                                  <div className="mt-1 text-xs text-slate-400">
+                                    {sale.mpesa_code}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-4 text-right text-sm font-medium text-slate-700">
+                                {formatMoney(sale.total)}
+                              </td>
+
+                              <td className="px-4 py-4 text-right text-sm text-red-600">
+                                {formatMoney(sale.refunded_amount)}
+                              </td>
+
+                              <td className="px-4 py-4 text-right text-sm font-semibold text-[#071827]">
+                                {formatMoney(sale.net_total)}
+                              </td>
+
+                              <td className="px-4 py-4 text-sm text-slate-600">
+                                {sale.sold_by_name || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end border-t border-slate-200 pt-5">
+                  <button
+                    type="button"
+                    onClick={closeDetailsModal}
+                    className="rounded-xl border border-slate-300 px-5 py-2.5 font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
 
       {/* ADD / EDIT CUSTOMER MODAL */}
       {showCustomerModal && (

@@ -10,6 +10,7 @@ export interface AuthRequest extends Request {
     name: string;
     email: string;
     role: string;
+    organizationId: number;
   };
 }
 
@@ -43,7 +44,18 @@ export const authenticateToken = (
       name: string;
       email: string;
       role: string;
+      organizationId: number;
     };
+
+    if (
+      !decoded.organizationId ||
+      !Number.isInteger(decoded.organizationId)
+    ) {
+      return res.status(401).json({
+        message:
+          "Your session is outdated. Please log in again.",
+      });
+    }
 
     req.user = decoded;
 

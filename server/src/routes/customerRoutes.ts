@@ -177,7 +177,123 @@ router.get("/:id", (req: AuthRequest, res) => {
       });
     }
 
-    return res.json(customer);
+    // Refunds are stored in sales_returns, not on the sales table.
+    // Derive each sale's refunded amount exactly like saleRoutes.ts.
+    const sales = db
+      .prepare(`
+        SELECT
+          sales.id,
+          sales.receipt_number,
+          sales.total,
+
+          COALESCE(
+            (
+              SELECT SUM(sr.refund_amount)
+              FROM sales_returns sr
+              WHERE sr.sale_id = sales.id
+            ),
+            0
+          ) AS refunded_amount,
+
+          sales.payment_method,
+          sales.cash_amount,
+          sales.mpesa_amount,
+          sales.mpesa_code,
+          sales.sale_date,
+          sales.is_backdated,
+          sales.created_at,
+          users.name AS sold_by_name
+
+        FROM sales
+
+        LEFT JOIN users
+          ON users.id = sales.sold_by
+
+        WHERE sales.customer_id = ?
+
+        ORDER BY
+          COALESCE(
+            sales.sale_date,
+            DATE(sales.created_at, 'localtime')
+          ) DESC,
+          sales.id DESC
+      `)
+      .all(customerId)
+      .map((sale: any) => {
+        const total = Number(sale.total || 0);
+        const refundedAmount = Number(
+          sale.refunded_amount || 0
+        );
+
+        return {
+          ...sale,
+          total,
+          refunded_amount: refundedAmount,
+          net_total: Math.max(
+            total - refundedAmount,
+            0
+          ),
+        };
+      });
+
+    const stats = sales.reduce(
+      (
+        totals: {
+          transactions: number;
+          gross_spent: number;
+          refunds: number;
+          net_spent: number;
+          last_purchase_date: string | null;
+        },
+        sale: any
+      ) => {
+        totals.transactions += 1;
+        totals.gross_spent += Number(sale.total || 0);
+        totals.refunds += Number(
+          sale.refunded_amount || 0
+        );
+        totals.net_spent += Number(
+          sale.net_total || 0
+        );
+
+        const saleDate =
+          sale.sale_date ||
+          (typeof sale.created_at === "string"
+            ? sale.created_at.slice(0, 10)
+            : null);
+
+        if (
+          saleDate &&
+          (
+            !totals.last_purchase_date ||
+            saleDate > totals.last_purchase_date
+          )
+        ) {
+          totals.last_purchase_date = saleDate;
+        }
+
+        return totals;
+      },
+      {
+        transactions: 0,
+        gross_spent: 0,
+        refunds: 0,
+        net_spent: 0,
+        last_purchase_date: null,
+      }
+    );
+
+    return res.json({
+      customer,
+      stats: {
+        transactions: Number(stats.transactions || 0),
+        gross_spent: Number(stats.gross_spent || 0),
+        refunds: Number(stats.refunds || 0),
+        net_spent: Number(stats.net_spent || 0),
+        last_purchase_date: stats.last_purchase_date,
+      },
+      sales,
+    });
   } catch (error) {
     console.error("Get customer error:", error);
 
@@ -479,6 +595,21 @@ router.delete(
       if (!customer) {
         return res.status(404).json({
           message: "Customer not found",
+        });
+      }
+
+      const linkedSales = db
+        .prepare(`
+          SELECT COUNT(*) AS count
+          FROM sales
+          WHERE customer_id = ?
+        `)
+        .get(customerId) as { count: number };
+
+      if (Number(linkedSales.count || 0) > 0) {
+        return res.status(409).json({
+          message:
+            "This customer has sales history and cannot be deleted. You can edit the customer details instead.",
         });
       }
 
