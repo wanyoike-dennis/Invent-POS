@@ -9,6 +9,7 @@ const router = express.Router();
 
 router.get("/", (req: AuthRequest, res) => {
   const isCashier = req.user?.role === "cashier";
+  const organizationId = req.user!.organizationId;
 
   const products = isCashier
     ? db
@@ -21,21 +22,24 @@ router.get("/", (req: AuthRequest, res) => {
             stock,
             created_at
           FROM products
+          WHERE organization_id = ?
           ORDER BY id DESC
         `)
-        .all()
+        .all(organizationId)
     : db
         .prepare(`
           SELECT *
           FROM products
+          WHERE organization_id = ?
           ORDER BY id DESC
         `)
-        .all();
+        .all(organizationId);
 
   res.json(products);
 });
 
-router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
+router.post("/", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
   const { name, category, cost_price, price, stock } = req.body;
 
   if (!name || !category || cost_price === undefined || price === undefined || stock === undefined) {
@@ -68,19 +72,39 @@ router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
 
   const result = db
     .prepare(`
-      INSERT INTO products (name, category, cost_price, price, stock)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO products (
+        name,
+        category,
+        cost_price,
+        price,
+        stock,
+        organization_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
     `)
-    .run(name, category, costPrice, sellingPrice, stockQuantity);
+    .run(
+      name,
+      category,
+      costPrice,
+      sellingPrice,
+      stockQuantity,
+      organizationId
+    );
 
   const product = db
-    .prepare("SELECT * FROM products WHERE id = ?")
-    .get(result.lastInsertRowid);
+    .prepare(`
+      SELECT *
+      FROM products
+      WHERE id = ?
+        AND organization_id = ?
+    `)
+    .get(result.lastInsertRowid, organizationId);
 
   res.status(201).json(product);
 });
 
-router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
+router.put("/:id", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
   const { id } = req.params;
   const { name, category, cost_price, price, stock } = req.body;
 
@@ -113,8 +137,13 @@ router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
   }
 
   const existingProduct = db
-    .prepare("SELECT id FROM products WHERE id = ?")
-    .get(id);
+    .prepare(`
+      SELECT id
+      FROM products
+      WHERE id = ?
+        AND organization_id = ?
+    `)
+    .get(id, organizationId);
 
   if (!existingProduct) {
     return res.status(404).json({
@@ -126,34 +155,59 @@ router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
     UPDATE products
     SET name = ?, category = ?, cost_price = ?, price = ?, stock = ?
     WHERE id = ?
-  `).run(name, category, costPrice, sellingPrice, stockQuantity, id);
+      AND organization_id = ?
+  `).run(
+    name,
+    category,
+    costPrice,
+    sellingPrice,
+    stockQuantity,
+    id,
+    organizationId
+  );
 
   const product = db
-    .prepare("SELECT * FROM products WHERE id = ?")
-    .get(id);
+    .prepare(`
+      SELECT *
+      FROM products
+      WHERE id = ?
+        AND organization_id = ?
+    `)
+    .get(id, organizationId);
 
   res.json(product);
 });
 
-router.delete("/:id", authorizeRoles("admin"), (req, res) => {
+router.delete("/:id", authorizeRoles("admin"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
   const { id } = req.params;
 
   db.prepare(
-    "DELETE FROM products WHERE id = ?"
-  ).run(id);
+    `
+      DELETE FROM products
+      WHERE id = ?
+        AND organization_id = ?
+    `
+  ).run(id, organizationId);
 
   res.json({
     message: "Product deleted successfully",
   });
 });
 
-router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req, res) => {
+router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
   const { id } = req.params;
   const { type, quantity, reason } = req.body;
 
   const product = db
-    .prepare("SELECT * FROM products WHERE id = ?")
-    .get(id) as {
+    .prepare(`
+      SELECT *
+      FROM products
+      WHERE id = ?
+        AND organization_id = ?
+    `)
+    .get(id, organizationId) as {
       id: number;
       stock: number;
     } | undefined;
@@ -198,6 +252,7 @@ router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req, res) => {
     UPDATE products
     SET stock = ?
     WHERE id = ?
+      AND organization_id = ?
   `);
 
   const addMovement = db.prepare(`
@@ -205,27 +260,38 @@ router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req, res) => {
       product_id,
       type,
       quantity,
-      reason
+      reason,
+      organization_id
     )
-    VALUES (?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?)
   `);
 
   const transaction = db.transaction(() => {
-    updateStock.run(newStock, id);
+    updateStock.run(
+      newStock,
+      id,
+      organizationId
+    );
 
     addMovement.run(
       id,
       type,
       qty,
-      reason?.trim() || null
+      reason?.trim() || null,
+      organizationId
     );
   });
 
   transaction();
 
   const updatedProduct = db
-    .prepare("SELECT * FROM products WHERE id = ?")
-    .get(id);
+    .prepare(`
+      SELECT *
+      FROM products
+      WHERE id = ?
+        AND organization_id = ?
+    `)
+    .get(id, organizationId);
 
   res.json(updatedProduct);
 });
@@ -241,6 +307,7 @@ router.post(
   "/:id/purchase",
   authorizeRoles("admin", "manager"),
   (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
     const { id } = req.params;
     const {
       quantity,
@@ -292,8 +359,12 @@ router.post(
           SELECT id
           FROM suppliers
           WHERE id = ?
+            AND organization_id = ?
         `)
-        .get(supplierId);
+        .get(
+          supplierId,
+          organizationId
+        );
 
       if (!supplier) {
         return res.status(404).json({
@@ -312,8 +383,9 @@ router.post(
           price
         FROM products
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(id) as
+      .get(id, organizationId) as
       | {
           id: number;
           name: string;
@@ -373,9 +445,10 @@ router.post(
           reference,
           notes,
           purchased_by,
-          purchase_date
+          purchase_date,
+          organization_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         product.id,
         qty,
@@ -393,23 +466,31 @@ router.post(
           ? notes.trim()
           : null,
         purchasedBy,
-        purchase_date
+        purchase_date,
+        organizationId
       );
 
       db.prepare(`
         UPDATE products
         SET stock = ?, cost_price = ?
         WHERE id = ?
-      `).run(newStock, newCostPrice, product.id);
+          AND organization_id = ?
+      `).run(
+        newStock,
+        newCostPrice,
+        product.id,
+        organizationId
+      );
 
       db.prepare(`
         INSERT INTO stock_movements (
           product_id,
           type,
           quantity,
-          reason
+          reason,
+          organization_id
         )
-        VALUES (?, 'in', ?, ?)
+        VALUES (?, 'in', ?, ?, ?)
       `).run(
         product.id,
         qty,
@@ -417,7 +498,8 @@ router.post(
           typeof reference === "string" && reference.trim()
             ? ` - ${reference.trim()}`
             : ""
-        }`
+        }`,
+        organizationId
       );
     });
 
@@ -428,8 +510,12 @@ router.post(
         SELECT *
         FROM products
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(product.id);
+      .get(
+        product.id,
+        organizationId
+      );
 
     res.status(201).json({
       message: "Stock purchase recorded successfully",
@@ -460,7 +546,9 @@ router.post(
 router.get(
   "/purchases/history",
   authorizeRoles("admin", "manager"),
-  (_req, res) => {
+  (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+
     const purchases = db
       .prepare(`
         SELECT
@@ -489,16 +577,19 @@ router.get(
           ON u.id = sp.purchased_by
         LEFT JOIN suppliers s
           ON s.id = sp.supplier_id
+        WHERE sp.organization_id = ?
         ORDER BY sp.purchase_date DESC, sp.id DESC
       `)
-      .all();
+      .all(organizationId);
 
     res.json(purchases);
   }
 );
 
 
-router.get("/stock/history", authorizeRoles("admin", "manager"), (req, res) => {
+router.get("/stock/history", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   const movements = db
     .prepare(`
       SELECT
@@ -512,9 +603,10 @@ router.get("/stock/history", authorizeRoles("admin", "manager"), (req, res) => {
       FROM stock_movements
       INNER JOIN products
         ON products.id = stock_movements.product_id
+      WHERE stock_movements.organization_id = ?
       ORDER BY stock_movements.id DESC
     `)
-    .all();
+    .all(organizationId);
 
   res.json(movements);
 });

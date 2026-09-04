@@ -316,6 +316,235 @@ db.exec(`
 `);
 
 // ==========================================================
+// PRODUCT / CATEGORY TENANT OWNERSHIP
+// Existing records are assigned to the default organization.
+// ==========================================================
+
+const categoryColumns = db
+  .prepare("PRAGMA table_info(categories)")
+  .all() as { name: string }[];
+
+if (
+  !categoryColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE categories
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+const tenantProductColumns = db
+  .prepare("PRAGMA table_info(products)")
+  .all() as { name: string }[];
+
+if (
+  !tenantProductColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE products
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+const stockMovementColumns = db
+  .prepare("PRAGMA table_info(stock_movements)")
+  .all() as { name: string }[];
+
+if (
+  !stockMovementColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE stock_movements
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+const stockPurchaseColumns = db
+  .prepare("PRAGMA table_info(stock_purchases)")
+  .all() as { name: string }[];
+
+if (
+  !stockPurchaseColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE stock_purchases
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+db.prepare(`
+  UPDATE categories
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.prepare(`
+  UPDATE products
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.prepare(`
+  UPDATE stock_movements
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.prepare(`
+  UPDATE stock_purchases
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_categories_organization
+  ON categories(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_products_organization
+  ON products(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_movements_organization
+  ON stock_movements(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_purchases_organization
+  ON stock_purchases(organization_id);
+`);
+
+// ==========================================================
+// CUSTOMER / SUPPLIER TENANT OWNERSHIP
+// Existing records are assigned to the default organization.
+// ==========================================================
+
+const customerTenantColumns = db
+  .prepare("PRAGMA table_info(customers)")
+  .all() as { name: string }[];
+
+if (
+  !customerTenantColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE customers
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+const supplierTenantColumns = db
+  .prepare("PRAGMA table_info(suppliers)")
+  .all() as { name: string }[];
+
+if (
+  !supplierTenantColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE suppliers
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+db.prepare(`
+  UPDATE customers
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.prepare(`
+  UPDATE suppliers
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_customers_organization
+  ON customers(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_suppliers_organization
+  ON suppliers(organization_id);
+`);
+
+// ==========================================================
+// SALES TENANT OWNERSHIP
+// Existing sales are assigned to the default organization.
+// Returns remain linked through their organization-owned sale.
+// ==========================================================
+
+const salesTenantColumns = db
+  .prepare("PRAGMA table_info(sales)")
+  .all() as { name: string }[];
+
+if (
+  !salesTenantColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE sales
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+db.prepare(`
+  UPDATE sales
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_sales_organization
+  ON sales(organization_id)
+`);
+
+// ==========================================================
+// EXPENSE TENANT OWNERSHIP
+// Existing expenses are assigned to the default organization.
+// ==========================================================
+
+const expenseTenantColumns = db
+  .prepare("PRAGMA table_info(expenses)")
+  .all() as { name: string }[];
+
+if (
+  !expenseTenantColumns.some(
+    (column) => column.name === "organization_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE expenses
+    ADD COLUMN organization_id INTEGER
+      REFERENCES organizations(id)
+  `);
+}
+
+db.prepare(`
+  UPDATE expenses
+  SET organization_id = ?
+  WHERE organization_id IS NULL
+`).run(defaultOrganization.id);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_expenses_organization
+  ON expenses(organization_id)
+`);
+
+// ==========================================================
 // COST PRICE / COGS MIGRATIONS
 // Adds the new columns safely to existing databases.
 // Existing records start at 0 until their historical costs

@@ -10,6 +10,8 @@ const router = express.Router();
 // ============================================================
 
 router.post("/", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const {
       title,
@@ -94,9 +96,10 @@ router.post("/", (req: AuthRequest, res) => {
           payment_method,
           description,
           recorded_by,
-          expense_date
+          expense_date,
+          organization_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         title.trim(),
@@ -108,7 +111,8 @@ router.post("/", (req: AuthRequest, res) => {
           ? description.trim()
           : null,
         req.user.id,
-        expenseDate
+        expenseDate,
+        organizationId
       );
 
     const expense = db
@@ -120,8 +124,12 @@ router.post("/", (req: AuthRequest, res) => {
         LEFT JOIN users
           ON users.id = expenses.recorded_by
         WHERE expenses.id = ?
+          AND expenses.organization_id = ?
       `)
-      .get(result.lastInsertRowid);
+      .get(
+        result.lastInsertRowid,
+        organizationId
+      );
 
     return res.status(201).json({
       message: "Expense recorded successfully",
@@ -152,6 +160,8 @@ router.post("/", (req: AuthRequest, res) => {
 // ============================================================
 
 router.get("/", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const search =
       typeof req.query.search === "string"
@@ -178,8 +188,12 @@ router.get("/", (req: AuthRequest, res) => {
         ? req.query.endDate.trim()
         : "";
 
-    const conditions: string[] = [];
-    const params: any[] = [];
+    const conditions: string[] = [
+      "expenses.organization_id = ?",
+    ];
+    const params: any[] = [
+      organizationId,
+    ];
 
     if (search) {
       conditions.push(`
@@ -354,6 +368,8 @@ router.get("/", (req: AuthRequest, res) => {
 // ============================================================
 
 router.put("/:id", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const expenseId = Number(req.params.id);
 
@@ -371,8 +387,12 @@ router.put("/:id", (req: AuthRequest, res) => {
         SELECT *
         FROM expenses
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(expenseId);
+      .get(
+        expenseId,
+        organizationId
+      );
 
     if (!existingExpense) {
       return res.status(404).json({
@@ -460,6 +480,7 @@ router.put("/:id", (req: AuthRequest, res) => {
         expense_date = ?
 
       WHERE id = ?
+        AND organization_id = ?
     `).run(
       title.trim(),
       category.trim(),
@@ -470,7 +491,8 @@ router.put("/:id", (req: AuthRequest, res) => {
         ? description.trim()
         : null,
       expenseDate,
-      expenseId
+      expenseId,
+      organizationId
     );
 
     const updatedExpense = db
@@ -485,8 +507,12 @@ router.put("/:id", (req: AuthRequest, res) => {
           ON users.id = expenses.recorded_by
 
         WHERE expenses.id = ?
+          AND expenses.organization_id = ?
       `)
-      .get(expenseId);
+      .get(
+        expenseId,
+        organizationId
+      );
 
     return res.json({
       message:
@@ -513,6 +539,8 @@ router.put("/:id", (req: AuthRequest, res) => {
 // ============================================================
 
 router.delete("/:id", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const expenseId = Number(req.params.id);
 
@@ -530,8 +558,12 @@ router.delete("/:id", (req: AuthRequest, res) => {
         SELECT *
         FROM expenses
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(expenseId);
+      .get(
+        expenseId,
+        organizationId
+      );
 
     if (!expense) {
       return res.status(404).json({
@@ -542,7 +574,11 @@ router.delete("/:id", (req: AuthRequest, res) => {
     db.prepare(`
       DELETE FROM expenses
       WHERE id = ?
-    `).run(expenseId);
+        AND organization_id = ?
+    `).run(
+      expenseId,
+      organizationId
+    );
 
     return res.json({
       message:

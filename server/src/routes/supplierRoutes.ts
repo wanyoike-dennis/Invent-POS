@@ -1,6 +1,7 @@
 import express from "express";
 import db from "../database/db.js";
 import { authorizeRoles } from "../middleware/authMiddleware.js";
+import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -26,7 +27,8 @@ const optionalText = (value: unknown) => {
 // Admin, Manager and Cashier can view.
 // ==========================================================
 
-router.get("/", (_req, res) => {
+router.get("/", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
   try {
     const suppliers = db
       .prepare(`
@@ -40,9 +42,10 @@ router.get("/", (_req, res) => {
           notes,
           created_at
         FROM suppliers
+        WHERE organization_id = ?
         ORDER BY name COLLATE NOCASE ASC, id DESC
       `)
-      .all();
+      .all(organizationId);
 
     res.json(suppliers);
   } catch (error) {
@@ -58,7 +61,9 @@ router.get("/", (_req, res) => {
 // Admin and Manager only.
 // ==========================================================
 
-router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
+router.post("/", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const {
       name,
@@ -95,9 +100,10 @@ router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
           phone,
           email,
           address,
-          notes
+          notes,
+          organization_id
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         supplierName,
@@ -105,7 +111,8 @@ router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
         optionalText(phone),
         supplierEmail,
         optionalText(address),
-        optionalText(notes)
+        optionalText(notes),
+        organizationId
       );
 
     const supplier = db
@@ -113,8 +120,12 @@ router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
         SELECT *
         FROM suppliers
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(result.lastInsertRowid);
+      .get(
+        result.lastInsertRowid,
+        organizationId
+      );
 
     res.status(201).json({
       message: "Supplier created successfully",
@@ -133,7 +144,9 @@ router.post("/", authorizeRoles("admin", "manager"), (req, res) => {
 // Admin and Manager only.
 // ==========================================================
 
-router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
+router.put("/:id", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const { id } = req.params;
     const {
@@ -150,8 +163,9 @@ router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
         SELECT id
         FROM suppliers
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(id);
+      .get(id, organizationId);
 
     if (!existingSupplier) {
       return res.status(404).json({
@@ -187,6 +201,7 @@ router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
         address = ?,
         notes = ?
       WHERE id = ?
+        AND organization_id = ?
     `).run(
       supplierName,
       optionalText(contact_person),
@@ -194,7 +209,8 @@ router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
       supplierEmail,
       optionalText(address),
       optionalText(notes),
-      id
+      id,
+      organizationId
     );
 
     const supplier = db
@@ -202,8 +218,12 @@ router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
         SELECT *
         FROM suppliers
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(id) as SupplierRow;
+      .get(
+        id,
+        organizationId
+      ) as SupplierRow;
 
     res.json({
       message: "Supplier updated successfully",
@@ -224,7 +244,9 @@ router.put("/:id", authorizeRoles("admin", "manager"), (req, res) => {
 // in stock_purchases is not deleted or cascaded.
 // ==========================================================
 
-router.delete("/:id", authorizeRoles("admin"), (req, res) => {
+router.delete("/:id", authorizeRoles("admin"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const { id } = req.params;
 
@@ -233,8 +255,9 @@ router.delete("/:id", authorizeRoles("admin"), (req, res) => {
         SELECT id
         FROM suppliers
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(id);
+      .get(id, organizationId);
 
     if (!existingSupplier) {
       return res.status(404).json({
@@ -247,8 +270,12 @@ router.delete("/:id", authorizeRoles("admin"), (req, res) => {
         SELECT COUNT(*) AS count
         FROM stock_purchases
         WHERE supplier_id = ?
+          AND organization_id = ?
       `)
-      .get(id) as { count: number };
+      .get(
+        id,
+        organizationId
+      ) as { count: number };
 
     if (Number(purchaseCount.count || 0) > 0) {
       return res.status(409).json({
@@ -260,7 +287,11 @@ router.delete("/:id", authorizeRoles("admin"), (req, res) => {
     db.prepare(`
       DELETE FROM suppliers
       WHERE id = ?
-    `).run(id);
+        AND organization_id = ?
+    `).run(
+      id,
+      organizationId
+    );
 
     res.json({
       message: "Supplier deleted successfully",

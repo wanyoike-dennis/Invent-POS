@@ -151,6 +151,8 @@ const parseLocalDate = (value: string) => {
 // ============================================================
 
 router.get("/", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const sales = db
       .prepare(`
@@ -177,15 +179,17 @@ router.get("/", (req: AuthRequest, res) => {
         LEFT JOIN customers
           ON customers.id = sales.customer_id
 
+        WHERE sales.organization_id = ?
         ${
           req.user?.role === "cashier"
-            ? "WHERE sales.sold_by = ?"
+            ? "AND sales.sold_by = ?"
             : ""
         }
 
         ORDER BY sales.id DESC
       `)
       .all(
+        organizationId,
         ...(req.user?.role === "cashier"
           ? [req.user.id]
           : [])
@@ -262,6 +266,8 @@ router.get("/", (req: AuthRequest, res) => {
 // ============================================================
 
 router.post("/", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   const {
     items,
     paymentMethod,
@@ -327,8 +333,12 @@ router.post("/", (req: AuthRequest, res) => {
             SELECT id, name, phone
             FROM customers
             WHERE id = ?
+              AND organization_id = ?
           `)
-          .get(parsedCustomerId) as
+          .get(
+            parsedCustomerId,
+            organizationId
+          ) as
           | { id: number; name: string; phone: string | null }
           | undefined;
 
@@ -351,8 +361,12 @@ router.post("/", (req: AuthRequest, res) => {
               stock
             FROM products
             WHERE id = ?
+              AND organization_id = ?
           `)
-          .get(item.productId) as
+          .get(
+            item.productId,
+            organizationId
+          ) as
           | {
               id: number;
               name: string;
@@ -432,9 +446,10 @@ router.post("/", (req: AuthRequest, res) => {
             is_backdated,
             cash_amount,
             mpesa_amount,
-            customer_id
+            customer_id,
+            organization_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           receiptNumber,
@@ -448,7 +463,8 @@ router.post("/", (req: AuthRequest, res) => {
           0,
           allocatedCash,
           allocatedMpesa,
-          selectedCustomerId
+          selectedCustomerId,
+          organizationId
         );
 
       const saleId =
@@ -473,6 +489,7 @@ router.post("/", (req: AuthRequest, res) => {
         UPDATE products
         SET stock = stock - ?
         WHERE id = ?
+          AND organization_id = ?
       `);
 
       // Record stock movement
@@ -481,9 +498,10 @@ router.post("/", (req: AuthRequest, res) => {
           product_id,
           type,
           quantity,
-          reason
+          reason,
+          organization_id
         )
-        VALUES (?, 'out', ?, ?)
+        VALUES (?, 'out', ?, ?, ?)
       `);
 
       for (const item of preparedItems) {
@@ -499,13 +517,15 @@ router.post("/", (req: AuthRequest, res) => {
 
         reduceStock.run(
           item.quantity,
-          item.id
+          item.id,
+          organizationId
         );
 
         recordStockMovement.run(
           item.id,
           item.quantity,
-          `Sale ${receiptNumber}`
+          `Sale ${receiptNumber}`,
+          organizationId
         );
       }
 
@@ -561,6 +581,8 @@ router.post(
   "/past",
   authorizeRoles("admin"),
   (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+
     const {
       items,
       paymentMethod,
@@ -665,8 +687,12 @@ router.post(
               SELECT id, name, phone
               FROM customers
               WHERE id = ?
+                AND organization_id = ?
             `)
-            .get(parsedCustomerId) as
+            .get(
+              parsedCustomerId,
+              organizationId
+            ) as
             | { id: number; name: string; phone: string | null }
             | undefined;
 
@@ -688,8 +714,12 @@ router.post(
                 stock
               FROM products
               WHERE id = ?
+                AND organization_id = ?
             `)
-            .get(item.productId) as
+            .get(
+              item.productId,
+              organizationId
+            ) as
             | {
                 id: number;
                 name: string;
@@ -766,9 +796,10 @@ router.post(
               is_backdated,
               cash_amount,
               mpesa_amount,
-              customer_id
+              customer_id,
+              organization_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `)
           .run(
             receiptNumber,
@@ -782,7 +813,8 @@ router.post(
             1,
             allocatedCash,
             allocatedMpesa,
-            selectedCustomerId
+            selectedCustomerId,
+            organizationId
           );
 
         const saleId =
@@ -805,6 +837,7 @@ router.post(
           UPDATE products
           SET stock = stock - ?
           WHERE id = ?
+            AND organization_id = ?
         `);
 
         const recordStockMovement = db.prepare(`
@@ -812,9 +845,10 @@ router.post(
             product_id,
             type,
             quantity,
-            reason
+            reason,
+            organization_id
           )
-          VALUES (?, 'out', ?, ?)
+          VALUES (?, 'out', ?, ?, ?)
         `);
 
         for (const item of preparedItems) {
@@ -830,13 +864,15 @@ router.post(
 
           reduceStock.run(
             item.quantity,
-            item.id
+            item.id,
+            organizationId
           );
 
           recordStockMovement.run(
             item.id,
             item.quantity,
-            `Backdated sale ${receiptNumber} (${backdatedSaleDate})`
+            `Backdated sale ${receiptNumber} (${backdatedSaleDate})`,
+            organizationId
           );
         }
 
@@ -887,7 +923,9 @@ router.post(
 // GET RETURNS HISTORY
 // ============================================================
 
-router.get("/returns/history", authorizeRoles("admin", "manager"), (req, res) => {
+router.get("/returns/history", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const returns = db
       .prepare(`
@@ -912,9 +950,11 @@ router.get("/returns/history", authorizeRoles("admin", "manager"), (req, res) =>
         LEFT JOIN users
           ON users.id = sr.returned_by
 
+        WHERE s.organization_id = ?
+
         ORDER BY sr.id DESC
       `)
-      .all()
+      .all(organizationId)
       .map((item: any) => ({
         ...item,
         refund_amount: Number(item.refund_amount),
@@ -940,6 +980,8 @@ router.get("/returns/history", authorizeRoles("admin", "manager"), (req, res) =>
 // ============================================================
 
 router.get("/:id", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const saleId = Number(req.params.id);
 
@@ -964,6 +1006,7 @@ router.get("/:id", (req: AuthRequest, res) => {
         LEFT JOIN customers
           ON customers.id = sales.customer_id
         WHERE sales.id = ?
+          AND sales.organization_id = ?
           ${
             req.user?.role === "cashier"
               ? "AND sales.sold_by = ?"
@@ -972,6 +1015,7 @@ router.get("/:id", (req: AuthRequest, res) => {
       `)
       .get(
         saleId,
+        organizationId,
         ...(req.user?.role === "cashier"
           ? [req.user.id]
           : [])
@@ -982,6 +1026,22 @@ router.get("/:id", (req: AuthRequest, res) => {
         message: "Sale not found",
       });
     }
+
+    const organization = db
+      .prepare(`
+        SELECT
+          id,
+          name,
+          slug,
+          phone,
+          email,
+          address,
+          receipt_footer,
+          currency
+        FROM organizations
+        WHERE id = ?
+      `)
+      .get(organizationId);
 
     const items = db
       .prepare(`
@@ -1094,6 +1154,7 @@ router.get("/:id", (req: AuthRequest, res) => {
       sale,
       items,
       returns,
+      organization,
       summary: {
         original_total: originalTotal,
         total_refunded: totalRefunded,
@@ -1118,6 +1179,8 @@ router.post(
   "/:id/return",
   authorizeRoles("admin", "manager"),
   (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+
     try {
       const saleId = Number(req.params.id);
 
@@ -1200,8 +1263,12 @@ router.post(
             total
           FROM sales
           WHERE id = ?
+            AND organization_id = ?
         `)
-        .get(saleId) as
+        .get(
+          saleId,
+          organizationId
+        ) as
         | {
             id: number;
             receipt_number: string;
@@ -1502,6 +1569,7 @@ router.post(
               SET stock = stock + ?
 
               WHERE id = ?
+                AND organization_id = ?
             `);
 
 
@@ -1515,10 +1583,11 @@ router.post(
                 product_id,
                 type,
                 quantity,
-                reason
+                reason,
+                organization_id
               )
 
-              VALUES (?, 'in', ?, ?)
+              VALUES (?, 'in', ?, ?, ?)
             `);
 
 
@@ -1544,7 +1613,8 @@ router.post(
             // Restore product stock
             restoreStock.run(
               item.quantity,
-              item.productId
+              item.productId,
+              organizationId
             );
 
 
@@ -1554,7 +1624,8 @@ router.post(
               item.quantity,
 
               `Return ${sale.receipt_number}: ` +
-                `${reason.trim()}`
+                `${reason.trim()}`,
+              organizationId
             );
           }
 

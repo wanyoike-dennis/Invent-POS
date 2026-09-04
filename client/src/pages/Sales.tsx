@@ -95,6 +95,17 @@ type SaleSummary = {
   net_total: number;
 };
 
+type ReceiptOrganization = {
+  id: number;
+  name: string;
+  slug: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  receipt_footer: string | null;
+  currency: string;
+};
+
 type ReturnHistoryRecord = {
   id: number;
   sale_id: number;
@@ -170,6 +181,7 @@ function Sales() {
     sale: Sale;
     items: SaleItem[];
     returns: SaleReturn[];
+    organization: ReceiptOrganization;
     summary: SaleSummary;
   } | null>(null);
 
@@ -318,6 +330,21 @@ function Sales() {
   const handlePrintReceipt = () => {
     window.print();
   };
+
+  const receiptOrganization = selectedSale?.organization;
+
+  const receiptCurrency =
+    receiptOrganization?.currency || "KES";
+
+  const receiptBusinessName =
+    receiptOrganization?.name || "Invent POS";
+
+  const receiptInitials = receiptBusinessName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "IP";
 
   const openReturnModal = () => {
     if (!canManageReturns || !selectedSale) return;
@@ -1162,16 +1189,30 @@ function Sales() {
               <div className="border-b border-slate-200 pb-5 text-center">
 
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 font-bold text-white print:border print:border-black print:bg-white print:text-black">
-                  IP
+                  {receiptInitials}
                 </div>
 
                 <h1 className="text-xl font-bold text-slate-900">
-                  Invent POS
+                  {receiptBusinessName}
                 </h1>
 
-                <p className="text-sm text-slate-500">
-                  Business Management System
-                </p>
+                {receiptOrganization?.phone && (
+                  <p className="mt-1 text-sm text-slate-500">
+                    {receiptOrganization.phone}
+                  </p>
+                )}
+
+                {receiptOrganization?.email && (
+                  <p className="text-sm text-slate-500">
+                    {receiptOrganization.email}
+                  </p>
+                )}
+
+                {receiptOrganization?.address && (
+                  <p className="text-sm text-slate-500">
+                    {receiptOrganization.address}
+                  </p>
+                )}
 
                 <p className="mt-2 text-xs font-medium uppercase tracking-wider text-slate-400">
                   Sales Receipt
@@ -1255,13 +1296,13 @@ function Sales() {
                     <div>
                       <p className="text-xs text-slate-500">Cash Portion</p>
                       <p className="mt-1 font-medium text-slate-800">
-                        KES {Number(selectedSale.sale.cash_amount || 0).toLocaleString()}
+                        {receiptCurrency} {Number(selectedSale.sale.cash_amount || 0).toLocaleString()}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">M-Pesa Portion</p>
                       <p className="mt-1 font-medium text-slate-800">
-                        KES {Number(selectedSale.sale.mpesa_amount || 0).toLocaleString()}
+                        {receiptCurrency} {Number(selectedSale.sale.mpesa_amount || 0).toLocaleString()}
                       </p>
                     </div>
                   </>
@@ -1330,12 +1371,12 @@ function Sales() {
                           </td>
 
                           <td className="px-4 py-3 text-right text-sm text-slate-600">
-                            KES{" "}
+                            {receiptCurrency}{" "}
                             {item.unit_price.toLocaleString()}
                           </td>
 
                           <td className="px-4 py-3 text-right text-sm font-medium text-slate-800">
-                            KES{" "}
+                            {receiptCurrency}{" "}
                             {item.subtotal.toLocaleString()}
                           </td>
 
@@ -1355,7 +1396,7 @@ function Sales() {
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Amount Paid</span>
                   <span>
-                    KES {Number(selectedSale.sale.amount_paid).toLocaleString()}
+                    {receiptCurrency} {Number(selectedSale.sale.amount_paid).toLocaleString()}
                   </span>
                 </div>
 
@@ -1364,7 +1405,7 @@ function Sales() {
                   <div className="flex justify-between text-sm text-slate-600">
                     <span>Change</span>
                     <span>
-                      KES {Number(selectedSale.sale.change_amount).toLocaleString()}
+                      {receiptCurrency} {Number(selectedSale.sale.change_amount).toLocaleString()}
                     </span>
                   </div>
                 )}
@@ -1374,21 +1415,21 @@ function Sales() {
                     <div className="flex justify-between border-t border-slate-200 pt-3 text-sm text-slate-600">
                       <span>Original Total</span>
                       <span>
-                        KES {selectedSale.summary.original_total.toLocaleString()}
+                        {receiptCurrency} {selectedSale.summary.original_total.toLocaleString()}
                       </span>
                     </div>
 
                     <div className="flex justify-between text-sm font-medium text-orange-600 print:text-black">
                       <span>Total Refunded</span>
                       <span>
-                        - KES {selectedSale.summary.total_refunded.toLocaleString()}
+                        - {receiptCurrency} {selectedSale.summary.total_refunded.toLocaleString()}
                       </span>
                     </div>
 
                     <div className="flex justify-between border-t border-slate-200 pt-3 text-xl font-bold text-slate-900">
                       <span>Net Sale</span>
                       <span>
-                        KES {selectedSale.summary.net_total.toLocaleString()}
+                        {receiptCurrency} {selectedSale.summary.net_total.toLocaleString()}
                       </span>
                     </div>
                   </>
@@ -1396,7 +1437,7 @@ function Sales() {
                   <div className="flex justify-between border-t border-slate-200 pt-3 text-xl font-bold text-slate-900">
                     <span>Total</span>
                     <span>
-                      KES {Number(selectedSale.sale.total).toLocaleString()}
+                      {receiptCurrency} {Number(selectedSale.sale.total).toLocaleString()}
                     </span>
                   </div>
                 )}
@@ -1431,7 +1472,7 @@ function Sales() {
                           </div>
 
                           <p className="font-bold text-orange-700 print:text-black">
-                            Refund: KES {saleReturn.refund_amount.toLocaleString()}
+                            Refund: {receiptCurrency} {saleReturn.refund_amount.toLocaleString()}
                           </p>
                         </div>
 
@@ -1462,12 +1503,12 @@ function Sales() {
                                   {item.product_name}
                                 </p>
                                 <p className="text-xs text-slate-500">
-                                  {item.quantity} × KES {item.unit_price.toLocaleString()}
+                                  {item.quantity} × {receiptCurrency} {item.unit_price.toLocaleString()}
                                 </p>
                               </div>
 
                               <p className="whitespace-nowrap font-semibold text-slate-800">
-                                KES {item.subtotal.toLocaleString()}
+                                {receiptCurrency} {item.subtotal.toLocaleString()}
                               </p>
                             </div>
                           ))}
@@ -1481,7 +1522,8 @@ function Sales() {
               <div className="border-t border-dashed border-slate-300 pt-5 text-center">
 
                 <p className="text-sm font-medium text-slate-700">
-                  Thank you for your business
+                  {receiptOrganization?.receipt_footer ||
+                    "Thank you for your business"}
                 </p>
 
                 <p className="mt-1 text-xs text-slate-400">

@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -10,7 +11,9 @@ const router = express.Router();
 // /api/reports?startDate=2026-09-01&endDate=2026-09-30
 // ============================================================
 
-router.get("/", (req, res) => {
+router.get("/", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const startDate =
       typeof req.query.startDate === "string"
@@ -26,13 +29,25 @@ router.get("/", (req, res) => {
     // DATE CONDITIONS
     // --------------------------------------------------------
 
-    const saleConditions: string[] = [];
-    const returnConditions: string[] = [];
-    const expenseConditions: string[] = [];
+    const saleConditions: string[] = [
+      "s.organization_id = ?",
+    ];
+    const returnConditions: string[] = [
+      "s.organization_id = ?",
+    ];
+    const expenseConditions: string[] = [
+      "e.organization_id = ?",
+    ];
 
-    const saleParams: string[] = [];
-    const returnParams: string[] = [];
-    const expenseParams: string[] = [];
+    const saleParams: Array<string | number> = [
+      organizationId,
+    ];
+    const returnParams: Array<string | number> = [
+      organizationId,
+    ];
+    const expenseParams: Array<string | number> = [
+      organizationId,
+    ];
 
     if (startDate) {
       saleConditions.push(
@@ -236,6 +251,8 @@ router.get("/", (req, res) => {
           ON sr.id = sri.return_id
         INNER JOIN sale_items si
           ON si.id = sri.sale_item_id
+        INNER JOIN sales s
+          ON s.id = si.sale_id
         ${returnWhere}
       `)
       .get(...returnParams) as {
@@ -394,6 +411,8 @@ router.get("/", (req, res) => {
             ) AS day
 
           FROM sales_returns sr
+          INNER JOIN sales s
+            ON s.id = sr.sale_id
 
           ${returnWhere}
 
@@ -422,6 +441,7 @@ router.get("/", (req, res) => {
                   DATE(s2.created_at, 'localtime')
                 )
               ) = dates.day
+                AND s2.organization_id = ?
             ),
             0
           ) AS gross_sales,
@@ -433,11 +453,14 @@ router.get("/", (req, res) => {
               )
 
               FROM sales_returns sr2
+              INNER JOIN sales rs2
+                ON rs2.id = sr2.sale_id
 
               WHERE DATE(
                 sr2.created_at,
                 'localtime'
               ) = dates.day
+                AND rs2.organization_id = ?
             ),
             0
           ) AS refunds,
@@ -456,6 +479,7 @@ router.get("/", (req, res) => {
                   DATE(s3.created_at, 'localtime')
                 )
               ) = dates.day
+                AND s3.organization_id = ?
             ),
             0
           ) AS original_cogs,
@@ -470,10 +494,13 @@ router.get("/", (req, res) => {
                 ON sr3.id = sri2.return_id
               INNER JOIN sale_items si3
                 ON si3.id = sri2.sale_item_id
+              INNER JOIN sales rs3
+                ON rs3.id = si3.sale_id
               WHERE DATE(
                 sr3.created_at,
                 'localtime'
               ) = dates.day
+                AND rs3.organization_id = ?
             ),
             0
           ) AS returned_cogs,
@@ -487,6 +514,7 @@ router.get("/", (req, res) => {
               WHERE DATE(
                 e2.expense_date
               ) = dates.day
+                AND e2.organization_id = ?
             ),
             0
           ) AS expenses
@@ -500,7 +528,12 @@ router.get("/", (req, res) => {
       .all(
         ...saleParams,
         ...returnParams,
-        ...expenseParams
+        ...expenseParams,
+        organizationId,
+        organizationId,
+        organizationId,
+        organizationId,
+        organizationId
       )
       .map((row: any) => {
         const gross = Number(

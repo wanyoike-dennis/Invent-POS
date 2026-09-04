@@ -47,22 +47,30 @@ const validateEmail = (value: string | null) => {
 // ============================================================
 
 router.get("/", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const search =
       typeof req.query.search === "string"
         ? req.query.search.trim()
         : "";
 
-    const params: string[] = [];
+    const params: Array<string | number> = [
+      organizationId,
+    ];
 
     const whereClause = search
       ? `
-        WHERE
-          LOWER(name) LIKE LOWER(?)
-          OR LOWER(COALESCE(phone, '')) LIKE LOWER(?)
-          OR LOWER(COALESCE(email, '')) LIKE LOWER(?)
+        WHERE organization_id = ?
+          AND (
+            LOWER(name) LIKE LOWER(?)
+            OR LOWER(COALESCE(phone, '')) LIKE LOWER(?)
+            OR LOWER(COALESCE(email, '')) LIKE LOWER(?)
+          )
       `
-      : "";
+      : `
+        WHERE organization_id = ?
+      `;
 
     if (search) {
       const pattern = `%${search}%`;
@@ -115,8 +123,9 @@ router.get("/", (req: AuthRequest, res) => {
             0
           ) AS added_last_7_days
         FROM customers
+        WHERE organization_id = ?
       `)
-      .get() as {
+      .get(organizationId) as {
         total_customers: number;
         added_today: number;
         added_last_7_days: number;
@@ -146,6 +155,8 @@ router.get("/", (req: AuthRequest, res) => {
 // ============================================================
 
 router.get("/:id", (req: AuthRequest, res) => {
+  const organizationId = req.user!.organizationId;
+
   try {
     const customerId = Number(req.params.id);
 
@@ -168,8 +179,12 @@ router.get("/:id", (req: AuthRequest, res) => {
           updated_at
         FROM customers
         WHERE id = ?
+          AND organization_id = ?
       `)
-      .get(customerId) as CustomerRow | undefined;
+      .get(
+        customerId,
+        organizationId
+      ) as CustomerRow | undefined;
 
     if (!customer) {
       return res.status(404).json({
@@ -312,6 +327,8 @@ router.post(
   "/",
   authorizeRoles("admin", "manager", "cashier"),
   (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+
     try {
       const name =
         typeof req.body.name === "string"
@@ -359,8 +376,9 @@ router.post(
             SELECT id
             FROM customers
             WHERE phone = ?
+              AND organization_id = ?
           `)
-          .get(phone) as { id: number } | undefined;
+          .get(phone, organizationId) as { id: number } | undefined;
 
         if (existingPhone) {
           return res.status(409).json({
@@ -378,16 +396,18 @@ router.post(
             email,
             address,
             notes,
+            organization_id,
             updated_at
           )
-          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         `)
         .run(
           name,
           phone,
           email,
           address,
-          notes
+          notes,
+          organizationId
         );
 
       const customerId = Number(result.lastInsertRowid);
@@ -405,8 +425,12 @@ router.post(
             updated_at
           FROM customers
           WHERE id = ?
+            AND organization_id = ?
         `)
-        .get(customerId);
+        .get(
+          customerId,
+          organizationId
+        );
 
       return res.status(201).json({
         message: "Customer added successfully",
@@ -440,6 +464,8 @@ router.put(
   "/:id",
   authorizeRoles("admin", "manager", "cashier"),
   (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+
     try {
       const customerId = Number(req.params.id);
 
@@ -454,8 +480,12 @@ router.put(
           SELECT id
           FROM customers
           WHERE id = ?
+            AND organization_id = ?
         `)
-        .get(customerId) as { id: number } | undefined;
+        .get(
+          customerId,
+          organizationId
+        ) as { id: number } | undefined;
 
       if (!existingCustomer) {
         return res.status(404).json({
@@ -492,8 +522,13 @@ router.put(
             FROM customers
             WHERE phone = ?
               AND id != ?
+              AND organization_id = ?
           `)
-          .get(phone, customerId) as
+          .get(
+            phone,
+            customerId,
+            organizationId
+          ) as
           | { id: number }
           | undefined;
 
@@ -515,13 +550,15 @@ router.put(
           notes = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
+          AND organization_id = ?
       `).run(
         name,
         phone,
         email,
         address,
         notes,
-        customerId
+        customerId,
+        organizationId
       );
 
       const customer = db
@@ -537,8 +574,12 @@ router.put(
             updated_at
           FROM customers
           WHERE id = ?
+            AND organization_id = ?
         `)
-        .get(customerId);
+        .get(
+          customerId,
+          organizationId
+        );
 
       return res.json({
         message: "Customer updated successfully",
@@ -573,6 +614,8 @@ router.delete(
   "/:id",
   authorizeRoles("admin", "manager"),
   (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+
     try {
       const customerId = Number(req.params.id);
 
@@ -587,8 +630,12 @@ router.delete(
           SELECT id, name
           FROM customers
           WHERE id = ?
+            AND organization_id = ?
         `)
-        .get(customerId) as
+        .get(
+          customerId,
+          organizationId
+        ) as
         | { id: number; name: string }
         | undefined;
 
@@ -616,7 +663,11 @@ router.delete(
       db.prepare(`
         DELETE FROM customers
         WHERE id = ?
-      `).run(customerId);
+          AND organization_id = ?
+      `).run(
+        customerId,
+        organizationId
+      );
 
       return res.json({
         message: "Customer deleted successfully",

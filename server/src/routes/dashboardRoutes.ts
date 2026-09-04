@@ -12,6 +12,7 @@ router.get("/", (req: AuthRequest, res) => {
   try {
     const isCashier = req.user?.role === "cashier";
     const userId = req.user?.id;
+    const organizationId = req.user!.organizationId;
 
     // --------------------------------------------------------
     // TODAY'S GROSS SALES
@@ -29,9 +30,13 @@ router.get("/", (req: AuthRequest, res) => {
                   DATE(created_at, 'localtime')
                 )
               ) = DATE('now', 'localtime')
+          AND organization_id = ?
           ${isCashier ? "AND sold_by = ?" : ""}
       `)
-      .get(...(isCashier ? [userId] : [])) as {
+      .get(
+        organizationId,
+        ...(isCashier ? [userId] : [])
+      ) as {
         gross_sales: number;
         transactions: number;
       };
@@ -51,11 +56,14 @@ router.get("/", (req: AuthRequest, res) => {
             SELECT
               COALESCE(SUM(refund_amount), 0) AS refunds,
               COUNT(*) AS return_transactions
-            FROM sales_returns
-            WHERE DATE(created_at, 'localtime') =
+            FROM sales_returns sr
+            INNER JOIN sales s
+              ON s.id = sr.sale_id
+            WHERE DATE(sr.created_at, 'localtime') =
                   DATE('now', 'localtime')
+              AND s.organization_id = ?
           `)
-          .get() as {
+          .get(organizationId) as {
             refunds: number;
             return_transactions: number;
           });
@@ -96,9 +104,13 @@ router.get("/", (req: AuthRequest, res) => {
                   DATE(s.created_at, 'localtime')
                 )
               ) = DATE('now', 'localtime')
+          AND s.organization_id = ?
           ${isCashier ? "AND s.sold_by = ?" : ""}
       `)
-      .get(...(isCashier ? [userId] : [])) as {
+      .get(
+        organizationId,
+        ...(isCashier ? [userId] : [])
+      ) as {
         original_cogs: number;
       };
 
@@ -116,10 +128,13 @@ router.get("/", (req: AuthRequest, res) => {
               ON sr.id = sri.return_id
             INNER JOIN sale_items si
               ON si.id = sri.sale_item_id
+            INNER JOIN sales s
+              ON s.id = si.sale_id
             WHERE DATE(sr.created_at, 'localtime') =
                   DATE('now', 'localtime')
+              AND s.organization_id = ?
           `)
-          .get() as {
+          .get(organizationId) as {
             returned_cogs: number;
           });
 
@@ -157,8 +172,9 @@ router.get("/", (req: AuthRequest, res) => {
             FROM expenses
             WHERE DATE(expense_date) =
                   DATE('now', 'localtime')
+              AND organization_id = ?
           `)
-          .get() as {
+          .get(organizationId) as {
             expenses: number;
             expense_transactions: number;
           });
@@ -190,8 +206,9 @@ router.get("/", (req: AuthRequest, res) => {
             0
           ) AS low_stock
         FROM products
+        WHERE organization_id = ?
       `)
-      .get() as {
+      .get(organizationId) as {
         total_products: number;
         low_stock: number;
       };
@@ -226,6 +243,7 @@ router.get("/", (req: AuthRequest, res) => {
                   DATE(s.created_at, 'localtime')
                 )
               ) = dates.day
+                AND s.organization_id = ?
                 ${isCashier ? "AND s.sold_by = ?" : ""}
             ),
             0
@@ -235,10 +253,13 @@ router.get("/", (req: AuthRequest, res) => {
             (
               SELECT SUM(sr.refund_amount)
               FROM sales_returns sr
+              INNER JOIN sales rs
+                ON rs.id = sr.sale_id
               WHERE DATE(
                 sr.created_at,
                 'localtime'
               ) = dates.day
+                AND rs.organization_id = ?
             ),
             0
           ) AS refunds,
@@ -257,6 +278,7 @@ router.get("/", (req: AuthRequest, res) => {
                   DATE(s2.created_at, 'localtime')
                 )
               ) = dates.day
+                AND s2.organization_id = ?
                 ${isCashier ? "AND s2.sold_by = ?" : ""}
             ),
             0
@@ -272,10 +294,13 @@ router.get("/", (req: AuthRequest, res) => {
                 ON sr2.id = sri.return_id
               INNER JOIN sale_items si2
                 ON si2.id = sri.sale_item_id
+              INNER JOIN sales rs2
+                ON rs2.id = si2.sale_id
               WHERE DATE(
                 sr2.created_at,
                 'localtime'
               ) = dates.day
+                AND rs2.organization_id = ?
             ),
             0
           ) AS returned_cogs,
@@ -287,6 +312,7 @@ router.get("/", (req: AuthRequest, res) => {
               WHERE DATE(
                 e.expense_date
               ) = dates.day
+                AND e.organization_id = ?
             ),
             0
           ) AS expenses
@@ -295,7 +321,15 @@ router.get("/", (req: AuthRequest, res) => {
 
         ORDER BY dates.day ASC
       `)
-      .all(...(isCashier ? [userId, userId] : []))
+      .all(
+        organizationId,
+        ...(isCashier ? [userId] : []),
+        organizationId,
+        organizationId,
+        ...(isCashier ? [userId] : []),
+        organizationId,
+        organizationId
+      )
       .map((row: any) => {
         const gross = Number(
           row.gross_sales || 0
@@ -379,13 +413,17 @@ router.get("/", (req: AuthRequest, res) => {
         LEFT JOIN users
           ON users.id = s.sold_by
 
-        ${isCashier ? "WHERE s.sold_by = ?" : ""}
+        WHERE s.organization_id = ?
+        ${isCashier ? "AND s.sold_by = ?" : ""}
 
         ORDER BY s.id DESC
 
         LIMIT 5
       `)
-      .all(...(isCashier ? [userId] : []))
+      .all(
+        organizationId,
+        ...(isCashier ? [userId] : [])
+      )
       .map((sale: any) => {
         const originalTotal = Number(
           sale.total

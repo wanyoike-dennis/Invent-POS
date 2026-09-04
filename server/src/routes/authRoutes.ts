@@ -275,6 +275,308 @@ router.post(
   }
 );
 
+// ============================================================
+// LIST ORGANIZATION STAFF
+// Admin only
+// ============================================================
+
+router.get(
+  "/users",
+  authenticateToken,
+  authorizeRoles("admin"),
+  (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+
+    try {
+      const users = db
+        .prepare(`
+          SELECT
+            id,
+            name,
+            email,
+            role,
+            organization_id,
+            created_at
+          FROM users
+          WHERE organization_id = ?
+          ORDER BY
+            CASE role
+              WHEN 'admin' THEN 1
+              WHEN 'manager' THEN 2
+              WHEN 'cashier' THEN 3
+              ELSE 4
+            END,
+            name ASC
+        `)
+        .all(organizationId);
+
+      return res.json(users);
+    } catch (error) {
+      console.error("List organization users error:", error);
+
+      return res.status(500).json({
+        message: "Failed to fetch organization users",
+      });
+    }
+  }
+);
+
+// ============================================================
+// UPDATE ORGANIZATION STAFF
+// Admin only
+// ============================================================
+
+router.put(
+  "/users/:id",
+  authenticateToken,
+  authorizeRoles("admin"),
+  (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+    const userId = Number(req.params.id);
+    const { name, email, role } = req.body;
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "Invalid user ID",
+      });
+    }
+
+    if (!name || !email || !role) {
+      return res.status(400).json({
+        message: "Name, email and role are required",
+      });
+    }
+
+    const normalizedRole = String(role).trim().toLowerCase();
+    const allowedRoles = ["admin", "manager", "cashier"];
+
+    if (!allowedRoles.includes(normalizedRole)) {
+      return res.status(400).json({
+        message: "Role must be admin, manager or cashier",
+      });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    try {
+      const targetUser = db
+        .prepare(`
+          SELECT id, role
+          FROM users
+          WHERE id = ?
+            AND organization_id = ?
+        `)
+        .get(userId, organizationId) as
+        | { id: number; role: string }
+        | undefined;
+
+      if (!targetUser) {
+        return res.status(404).json({
+          message: "User not found",
+        });
+      }
+
+      if (
+        userId === req.user!.id &&
+        normalizedRole !== "admin"
+      ) {
+        return res.status(400).json({
+          message: "You cannot remove your own Admin role",
+        });
+      }
+
+      const emailOwner = db
+        .prepare(`
+          SELECT id
+          FROM users
+          WHERE email = ?
+            AND id != ?
+        `)
+        .get(normalizedEmail, userId);
+
+      if (emailOwner) {
+        return res.status(400).json({
+          message: "A user with this email already exists",
+        });
+      }
+
+      db.prepare(`
+        UPDATE users
+        SET
+          name = ?,
+          email = ?,
+          role = ?
+        WHERE id = ?
+          AND organization_id = ?
+      `).run(
+        String(name).trim(),
+        normalizedEmail,
+        normalizedRole,
+        userId,
+        organizationId
+      );
+
+      const updatedUser = db
+        .prepare(`
+          SELECT
+            id,
+            name,
+            email,
+            role,
+            organization_id,
+            created_at
+          FROM users
+          WHERE id = ?
+            AND organization_id = ?
+        `)
+        .get(userId, organizationId);
+
+      return res.json({
+        message: "User updated successfully",
+        user: updatedUser,
+      });
+    } catch (error) {
+      console.error("Update organization user error:", error);
+
+      return res.status(500).json({
+        message: "Failed to update user",
+      });
+    }
+  }
+);
+
+// ============================================================
+// RESET ORGANIZATION STAFF PASSWORD
+// Admin only
+// ============================================================
+
+router.put(
+  "/users/:id/password",
+  authenticateToken,
+  authorizeRoles("admin"),
+  async (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+    const userId = Number(req.params.id);
+    const { password } = req.body;
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "Invalid user ID",
+      });
+    }
+
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters",
+      });
+    }
+
+    try {
+      const targetUser = db
+        .prepare(`
+          SELECT id
+          FROM users
+          WHERE id = ?
+            AND organization_id = ?
+        `)
+        .get(userId, organizationId);
+
+      if (!targetUser) {
+        return res.status(404).json({
+          message: "User not found",
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(
+        String(password),
+        10
+      );
+
+      db.prepare(`
+        UPDATE users
+        SET password = ?
+        WHERE id = ?
+          AND organization_id = ?
+      `).run(
+        hashedPassword,
+        userId,
+        organizationId
+      );
+
+      return res.json({
+        message: "Password reset successfully",
+      });
+    } catch (error) {
+      console.error("Reset user password error:", error);
+
+      return res.status(500).json({
+        message: "Failed to reset password",
+      });
+    }
+  }
+);
+
+// ============================================================
+// DELETE ORGANIZATION STAFF
+// Admin only
+// ============================================================
+
+router.delete(
+  "/users/:id",
+  authenticateToken,
+  authorizeRoles("admin"),
+  (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+    const userId = Number(req.params.id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        message: "Invalid user ID",
+      });
+    }
+
+    if (userId === req.user!.id) {
+      return res.status(400).json({
+        message: "You cannot delete your own account",
+      });
+    }
+
+    try {
+      const targetUser = db
+        .prepare(`
+          SELECT id
+          FROM users
+          WHERE id = ?
+            AND organization_id = ?
+        `)
+        .get(userId, organizationId);
+
+      if (!targetUser) {
+        return res.status(404).json({
+          message: "User not found",
+        });
+      }
+
+      db.prepare(`
+        DELETE FROM users
+        WHERE id = ?
+          AND organization_id = ?
+      `).run(userId, organizationId);
+
+      return res.json({
+        message: "User deleted successfully",
+      });
+    } catch (error) {
+      console.error("Delete organization user error:", error);
+
+      return res.status(500).json({
+        message:
+          "Failed to delete user. The user may already have sales or other records linked to their account.",
+      });
+    }
+  }
+);
+
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
