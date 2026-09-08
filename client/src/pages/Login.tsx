@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../services/api";
 
@@ -18,6 +18,15 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loginMessage = sessionStorage.getItem("loginMessage");
+
+    if (loginMessage) {
+      setError(loginMessage);
+      sessionStorage.removeItem("loginMessage");
+    }
+  }, []);
 
   const handleLogin = async (
     e: React.FormEvent<HTMLFormElement>

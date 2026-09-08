@@ -14,6 +14,9 @@ db.exec(`
     address TEXT,
     receipt_footer TEXT,
     currency TEXT NOT NULL DEFAULT 'KES',
+    status TEXT NOT NULL DEFAULT 'active',
+    trial_ends_at DATETIME,
+    subscription_expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -55,6 +58,7 @@ db.exec(`
     password TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin',
     organization_id INTEGER,
+    is_active INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (organization_id)
       REFERENCES organizations(id)
@@ -288,6 +292,60 @@ if (!defaultOrganization) {
   );
 }
 
+// ==========================================================
+// ORGANIZATION ACCESS / SUBSCRIPTION STATUS
+// Existing organizations stay active.
+// ==========================================================
+
+const organizationStatusColumns = db
+  .prepare("PRAGMA table_info(organizations)")
+  .all() as { name: string }[];
+
+if (
+  !organizationStatusColumns.some(
+    (column) => column.name === "status"
+  )
+) {
+  db.exec(`
+    ALTER TABLE organizations
+    ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+  `);
+}
+
+if (
+  !organizationStatusColumns.some(
+    (column) => column.name === "trial_ends_at"
+  )
+) {
+  db.exec(`
+    ALTER TABLE organizations
+    ADD COLUMN trial_ends_at DATETIME
+  `);
+}
+
+if (
+  !organizationStatusColumns.some(
+    (column) => column.name === "subscription_expires_at"
+  )
+) {
+  db.exec(`
+    ALTER TABLE organizations
+    ADD COLUMN subscription_expires_at DATETIME
+  `);
+}
+
+db.exec(`
+  UPDATE organizations
+  SET status = 'active'
+  WHERE status IS NULL
+     OR TRIM(status) = ''
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_organizations_status
+  ON organizations(status)
+`);
+
 const userColumns = db
   .prepare("PRAGMA table_info(users)")
   .all() as { name: string }[];
@@ -314,6 +372,38 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_users_organization
   ON users(organization_id)
 `);
+
+// ==========================================================
+// USER STATUS / SOFT DEACTIVATION
+// Keeps historical sales and audit references intact.
+// ==========================================================
+
+const userStatusColumns = db
+  .prepare("PRAGMA table_info(users)")
+  .all() as { name: string }[];
+
+if (
+  !userStatusColumns.some(
+    (column) => column.name === "is_active"
+  )
+) {
+  db.exec(`
+    ALTER TABLE users
+    ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
+  `);
+}
+
+db.exec(`
+  UPDATE users
+  SET is_active = 1
+  WHERE is_active IS NULL
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_users_active
+  ON users(is_active)
+`);
+
 
 // ==========================================================
 // PRODUCT / CATEGORY TENANT OWNERSHIP

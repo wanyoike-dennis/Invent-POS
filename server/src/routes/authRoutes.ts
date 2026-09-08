@@ -255,6 +255,7 @@ router.post(
             email,
             role,
             organization_id,
+            is_active,
             created_at
           FROM users
           WHERE id = ?
@@ -296,6 +297,7 @@ router.get(
             email,
             role,
             organization_id,
+            is_active,
             created_at
           FROM users
           WHERE organization_id = ?
@@ -424,6 +426,7 @@ router.put(
             email,
             role,
             organization_id,
+            is_active,
             created_at
           FROM users
           WHERE id = ?
@@ -517,17 +520,19 @@ router.put(
 );
 
 // ============================================================
-// DELETE ORGANIZATION STAFF
+// ACTIVATE / DEACTIVATE ORGANIZATION STAFF
 // Admin only
+// Soft status change preserves historical records.
 // ============================================================
 
-router.delete(
-  "/users/:id",
+router.put(
+  "/users/:id/status",
   authenticateToken,
   authorizeRoles("admin"),
   (req: AuthRequest, res) => {
     const organizationId = req.user!.organizationId;
     const userId = Number(req.params.id);
+    const { isActive } = req.body;
 
     if (!Number.isInteger(userId) || userId <= 0) {
       return res.status(400).json({
@@ -535,21 +540,36 @@ router.delete(
       });
     }
 
-    if (userId === req.user!.id) {
+    if (typeof isActive !== "boolean") {
       return res.status(400).json({
-        message: "You cannot delete your own account",
+        message: "isActive must be true or false",
+      });
+    }
+
+    if (userId === req.user!.id && !isActive) {
+      return res.status(400).json({
+        message: "You cannot deactivate your own account",
       });
     }
 
     try {
       const targetUser = db
         .prepare(`
-          SELECT id
+          SELECT
+            id,
+            name,
+            is_active
           FROM users
           WHERE id = ?
             AND organization_id = ?
         `)
-        .get(userId, organizationId);
+        .get(userId, organizationId) as
+        | {
+            id: number;
+            name: string;
+            is_active: number;
+          }
+        | undefined;
 
       if (!targetUser) {
         return res.status(404).json({
@@ -558,20 +578,46 @@ router.delete(
       }
 
       db.prepare(`
-        DELETE FROM users
+        UPDATE users
+        SET is_active = ?
         WHERE id = ?
           AND organization_id = ?
-      `).run(userId, organizationId);
+      `).run(
+        isActive ? 1 : 0,
+        userId,
+        organizationId
+      );
+
+      const updatedUser = db
+        .prepare(`
+          SELECT
+            id,
+            name,
+            email,
+            role,
+            organization_id,
+            is_active,
+            created_at
+          FROM users
+          WHERE id = ?
+            AND organization_id = ?
+        `)
+        .get(userId, organizationId);
 
       return res.json({
-        message: "User deleted successfully",
+        message: isActive
+          ? "User reactivated successfully"
+          : "User deactivated successfully",
+        user: updatedUser,
       });
     } catch (error) {
-      console.error("Delete organization user error:", error);
+      console.error(
+        "Update user status error:",
+        error
+      );
 
       return res.status(500).json({
-        message:
-          "Failed to delete user. The user may already have sales or other records linked to their account.",
+        message: "Failed to update user status",
       });
     }
   }
@@ -595,9 +641,13 @@ router.post("/login", async (req, res) => {
         users.password,
         users.role,
         users.organization_id,
+        users.is_active,
         organizations.name AS organization_name,
         organizations.slug AS organization_slug,
-        organizations.currency AS organization_currency
+        organizations.currency AS organization_currency,
+        organizations.status AS organization_status,
+        organizations.trial_ends_at,
+        organizations.subscription_expires_at
       FROM users
       LEFT JOIN organizations
         ON organizations.id = users.organization_id
@@ -611,9 +661,13 @@ router.post("/login", async (req, res) => {
         password: string;
         role: string;
         organization_id: number | null;
+        is_active: number;
         organization_name: string | null;
         organization_slug: string | null;
         organization_currency: string | null;
+        organization_status: string | null;
+        trial_ends_at: string | null;
+        subscription_expires_at: string | null;
       }
     | undefined;
 
@@ -628,6 +682,69 @@ router.post("/login", async (req, res) => {
       message:
         "This user is not assigned to an organization.",
     });
+  }
+
+  if (Number(user.is_active) !== 1) {
+    return res.status(403).json({
+      message:
+        "This account has been deactivated. Contact your organization Admin.",
+    });
+  }
+
+  const organizationStatus = String(
+    user.organization_status || "active"
+  ).toLowerCase();
+
+  if (organizationStatus === "suspended") {
+    return res.status(403).json({
+      message:
+        "This organization has been suspended. Contact Invent POS support.",
+    });
+  }
+
+  if (organizationStatus === "expired") {
+    return res.status(403).json({
+      message:
+        "This organization's subscription has expired. Contact Invent POS support.",
+    });
+  }
+
+  const now = new Date();
+
+  if (
+    organizationStatus === "trial" &&
+    user.trial_ends_at
+  ) {
+    const trialEndsAt = new Date(user.trial_ends_at);
+
+    if (
+      !Number.isNaN(trialEndsAt.getTime()) &&
+      trialEndsAt.getTime() < now.getTime()
+    ) {
+      return res.status(403).json({
+        message:
+          "This organization's trial period has ended. Contact Invent POS support.",
+      });
+    }
+  }
+
+  if (
+    organizationStatus === "active" &&
+    user.subscription_expires_at
+  ) {
+    const subscriptionExpiresAt = new Date(
+      user.subscription_expires_at
+    );
+
+    if (
+      !Number.isNaN(subscriptionExpiresAt.getTime()) &&
+      subscriptionExpiresAt.getTime() < now.getTime()
+    ) {
+      return res.status(403).json({
+        message:
+          "This organization's subscription has expired. Contact Invent POS support.",
+      });
+    }
   }
 
   const passwordMatches = await bcrypt.compare(
@@ -674,6 +791,13 @@ router.post("/login", async (req, res) => {
         currency:
           user.organization_currency ||
           "KES",
+        status:
+          user.organization_status ||
+          "active",
+        trialEndsAt:
+          user.trial_ends_at,
+        subscriptionExpiresAt:
+          user.subscription_expires_at,
       },
     },
   });

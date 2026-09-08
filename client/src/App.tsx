@@ -10,6 +10,9 @@ import Suppliers from "./pages/Suppliers";
 import Expenses from "./pages/Expenses";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
+import SuperAdminLogin from "./pages/SuperAdminLogin";
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
+import SuperAdminProtectedRoute from "./components/SuperAdminProtectedRoute";
 
 import MainLayout from "./layouts/MainLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -18,8 +21,15 @@ function App() {
   return (
     <Routes>
 
-      {/* Public route */}
+      {/* Public routes */}
       <Route path="/" element={<Login />} />
+      <Route path="/login" element={<Login />} />
+
+      {/* Super Admin routes */}
+      <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+      <Route element={<SuperAdminProtectedRoute />}>
+        <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
+      </Route>
 
       {/* Protected routes */}
       <Route element={<ProtectedRoute />}>
@@ -70,11 +80,8 @@ function App() {
             path="/settings"
             element={<Settings />}
           />
-
         </Route>
-
       </Route>
-
     </Routes>
   );
 }

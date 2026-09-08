@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
+import "dotenv/config";
 import productRoutes from "./routes/productRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -15,8 +15,8 @@ import expenseRoutes from "./routes/expenseRoutes.js";
 import supplierRoutes from "./routes/supplierRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
 import organizationRoutes from "./routes/organizationRoutes.js";
+import superAdminRoutes from "./routes/superAdminRoutes.js";
 
-dotenv.config();
 
 const app = express();
 
@@ -42,6 +42,7 @@ app.use("/api/expenses",authenticateToken,authorizeRoles("admin", "manager"),exp
 app.use("/api/suppliers", authenticateToken, supplierRoutes);
 app.use("/api/customers", authenticateToken, customerRoutes);
 app.use("/api/organization", authenticateToken, organizationRoutes);
+app.use("/api/super-admin", superAdminRoutes);
 
 
 const PORT = process.env.PORT || 5000;

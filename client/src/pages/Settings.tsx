@@ -14,7 +14,8 @@ import {
   Users,
   Pencil,
   KeyRound,
-  Trash2,
+  UserCheck,
+  UserX,
   X,
 } from "lucide-react";
 import { apiFetch } from "../services/api";
@@ -56,6 +57,7 @@ type StaffUser = {
   email: string;
   role: "admin" | "manager" | "cashier";
   organization_id: number;
+  is_active: number;
   created_at: string;
 };
 
@@ -478,9 +480,14 @@ function Settings() {
     }
   };
 
-  const handleDeleteStaff = async (user: StaffUser) => {
+  const handleStaffStatus = async (user: StaffUser) => {
+    const currentlyActive = Number(user.is_active) === 1;
+    const nextActive = !currentlyActive;
+
     const confirmed = window.confirm(
-      `Remove ${user.name} from this organization?`
+      nextActive
+        ? `Reactivate ${user.name}? They will be able to log in again.`
+        : `Deactivate ${user.name}? They will no longer be able to log in, but their historical records will be preserved.`
     );
 
     if (!confirmed) return;
@@ -491,9 +498,12 @@ function Settings() {
       setStaffMessage("");
 
       const response = await apiFetch(
-        `/api/auth/users/${user.id}`,
+        `/api/auth/users/${user.id}/status`,
         {
-          method: "DELETE",
+          method: "PUT",
+          body: JSON.stringify({
+            isActive: nextActive,
+          }),
         }
       );
 
@@ -501,19 +511,23 @@ function Settings() {
 
       if (!response.ok) {
         throw new Error(
-          data.message || "Failed to delete user"
+          data.message || "Failed to update user status"
         );
       }
 
       setStaffMessage(
-        data.message || "User deleted successfully"
+        data.message ||
+          (nextActive
+            ? "User reactivated successfully"
+            : "User deactivated successfully")
       );
+
       await fetchStaff();
     } catch (error) {
       setStaffError(
         error instanceof Error
           ? error.message
-          : "Could not delete staff user."
+          : "Could not update staff status."
       );
     } finally {
       setStaffBusy(false);
@@ -1157,11 +1171,12 @@ function Settings() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px]">
+                  <table className="w-full min-w-[820px]">
                     <thead>
                       <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
                         <th className="px-3 py-3">User</th>
                         <th className="px-3 py-3">Role</th>
+                        <th className="px-3 py-3">Status</th>
                         <th className="px-3 py-3">Created</th>
                         <th className="px-3 py-3 text-right">Actions</th>
                       </tr>
@@ -1185,6 +1200,18 @@ function Settings() {
                             <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
                               {user.role}
                             </span>
+                          </td>
+
+                          <td className="px-3 py-4">
+                            {Number(user.is_active) === 1 ? (
+                              <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                                Active
+                              </span>
+                            ) : (
+                              <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                                Inactive
+                              </span>
+                            )}
                           </td>
 
                           <td className="px-3 py-4 text-sm text-slate-500">
@@ -1218,12 +1245,24 @@ function Settings() {
 
                               <button
                                 type="button"
-                                title="Delete user"
+                                title={
+                                  Number(user.is_active) === 1
+                                    ? "Deactivate user"
+                                    : "Reactivate user"
+                                }
                                 disabled={staffBusy}
-                                onClick={() => handleDeleteStaff(user)}
-                                className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                                onClick={() => handleStaffStatus(user)}
+                                className={
+                                  Number(user.is_active) === 1
+                                    ? "rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                                    : "rounded-lg p-2 text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"
+                                }
                               >
-                                <Trash2 size={17} />
+                                {Number(user.is_active) === 1 ? (
+                                  <UserX size={17} />
+                                ) : (
+                                  <UserCheck size={17} />
+                                )}
                               </button>
                             </div>
                           </td>
