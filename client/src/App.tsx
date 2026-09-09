@@ -12,6 +12,9 @@ import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import SuperAdminLogin from "./pages/SuperAdminLogin";
 import SuperAdminDashboard from "./pages/SuperAdminDashboard";
+import SuperAdminBilling from "./pages/SuperAdminBilling";
+import SuperAdminPlans from "./pages/SuperAdminPlans";
+import SuperAdminOrganizationDetails from "./pages/SuperAdminOrganizationDetails";
 import SuperAdminProtectedRoute from "./components/SuperAdminProtectedRoute";
 
 import MainLayout from "./layouts/MainLayout";
@@ -29,6 +32,9 @@ function App() {
       <Route path="/super-admin/login" element={<SuperAdminLogin />} />
       <Route element={<SuperAdminProtectedRoute />}>
         <Route path="/super-admin/dashboard" element={<SuperAdminDashboard />} />
+        <Route path="/super-admin/billing" element={<SuperAdminBilling />} />
+        <Route path="/super-admin/plans" element={<SuperAdminPlans />} />
+        <Route path="/super-admin/organizations/:id" element={<SuperAdminOrganizationDetails />} />
       </Route>
 
       {/* Protected routes */}
@@ -80,8 +86,11 @@ function App() {
             path="/settings"
             element={<Settings />}
           />
+
         </Route>
+
       </Route>
+
     </Routes>
   );
 }

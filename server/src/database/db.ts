@@ -780,6 +780,195 @@ db.exec(`
   ON sales(customer_id)
 `);
 
+
+// ==========================================================
+// PLATFORM SUBSCRIPTIONS / PAYMENTS
+// Platform billing metadata only; separate from tenant sales.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS subscription_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    plan TEXT NOT NULL,
+    billing_cycle TEXT NOT NULL,
+    amount REAL NOT NULL,
+    payment_method TEXT NOT NULL,
+    payment_reference TEXT,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    paid_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_subscription_payments_organization
+    ON subscription_payments(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_subscription_payments_paid_at
+    ON subscription_payments(paid_at);
+`);
+
+const subscriptionOrganizationColumns = db
+  .prepare("PRAGMA table_info(organizations)")
+  .all() as { name: string }[];
+
+if (
+  !subscriptionOrganizationColumns.some(
+    (column) => column.name === "subscription_plan"
+  )
+) {
+  db.exec(`
+    ALTER TABLE organizations
+    ADD COLUMN subscription_plan TEXT
+  `);
+}
+
+if (
+  !subscriptionOrganizationColumns.some(
+    (column) => column.name === "billing_cycle"
+  )
+) {
+  db.exec(`
+    ALTER TABLE organizations
+    ADD COLUMN billing_cycle TEXT
+  `);
+}
+
+// ==========================================================
+// SUBSCRIPTION PLAN CATALOG / PRICING
+// Platform-owned pricing used by Super Admin billing.
+// Safe to run on every backend start.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS subscription_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1
+      CHECK (is_active IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS subscription_plan_prices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    billing_cycle TEXT NOT NULL
+      CHECK (
+        billing_cycle IN (
+          'monthly',
+          'quarterly',
+          'annual'
+        )
+      ),
+    amount REAL NOT NULL CHECK (amount > 0),
+    currency TEXT NOT NULL DEFAULT 'KES',
+    is_active INTEGER NOT NULL DEFAULT 1
+      CHECK (is_active IN (0, 1)),
+    effective_from DATETIME DEFAULT CURRENT_TIMESTAMP,
+    effective_to DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (plan_id)
+      REFERENCES subscription_plans(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_subscription_plan_prices_plan
+    ON subscription_plan_prices(plan_id);
+
+  CREATE INDEX IF NOT EXISTS idx_subscription_plan_prices_cycle
+    ON subscription_plan_prices(billing_cycle);
+`);
+
+const seedSubscriptionPlan = db.prepare(`
+  INSERT OR IGNORE INTO subscription_plans (
+    code,
+    name,
+    description,
+    is_active,
+    sort_order
+  )
+  VALUES (?, ?, ?, 1, ?)
+`);
+
+seedSubscriptionPlan.run(
+  "starter",
+  "Starter",
+  "Entry plan for small businesses and simple POS operations.",
+  10
+);
+
+seedSubscriptionPlan.run(
+  "business",
+  "Business",
+  "Growth plan for businesses that need more operational capacity.",
+  20
+);
+
+seedSubscriptionPlan.run(
+  "pro",
+  "Pro",
+  "Advanced plan for larger and more demanding POS operations.",
+  30
+);
+
+const seedSubscriptionPrice = db.prepare(`
+  INSERT INTO subscription_plan_prices (
+    plan_id,
+    billing_cycle,
+    amount,
+    currency,
+    is_active
+  )
+  SELECT
+    id,
+    ?,
+    ?,
+    'KES',
+    1
+  FROM subscription_plans
+  WHERE code = ?
+    AND NOT EXISTS (
+      SELECT 1
+      FROM subscription_plan_prices
+      WHERE plan_id = subscription_plans.id
+        AND billing_cycle = ?
+        AND is_active = 1
+    )
+`);
+
+const seedPrice = (
+  planCode: string,
+  billingCycle: "monthly" | "quarterly" | "annual",
+  amount: number
+) => {
+  seedSubscriptionPrice.run(
+    billingCycle,
+    amount,
+    planCode,
+    billingCycle
+  );
+};
+
+seedPrice("starter", "monthly", 1000);
+seedPrice("starter", "quarterly", 2700);
+seedPrice("starter", "annual", 10000);
+
+seedPrice("business", "monthly", 2000);
+seedPrice("business", "quarterly", 5400);
+seedPrice("business", "annual", 20000);
+
+seedPrice("pro", "monthly", 3500);
+seedPrice("pro", "quarterly", 9500);
+seedPrice("pro", "annual", 35000);
+
+
 const insertCategory = db.prepare(`
   INSERT OR IGNORE INTO categories (name)
   VALUES (?)

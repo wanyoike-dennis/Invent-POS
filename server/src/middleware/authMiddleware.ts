@@ -189,6 +189,15 @@ export const authenticateToken = (
         trialEndsAt.getTime() <
           now.getTime()
       ) {
+        db.prepare(`
+          UPDATE organizations
+          SET
+            status = 'expired',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+            AND status = 'trial'
+        `).run(decoded.organizationId);
+
         return res
           .status(403)
           .json({
@@ -217,6 +226,15 @@ export const authenticateToken = (
         subscriptionExpiresAt.getTime() <
           now.getTime()
       ) {
+        db.prepare(`
+          UPDATE organizations
+          SET
+            status = 'expired',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+            AND status = 'active'
+        `).run(decoded.organizationId);
+
         return res
           .status(403)
           .json({

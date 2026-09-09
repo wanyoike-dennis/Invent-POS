@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  BarChart3,
   Building2,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
   Clock3,
   LogOut,
+  CreditCard,
+  FileText,
+  Smartphone,
+  PackageCheck,
   Plus,
   RefreshCw,
   Search,
@@ -51,6 +56,8 @@ type Organization = {
   status: OrganizationStatus;
   trial_ends_at?: string | null;
   subscription_expires_at?: string | null;
+  subscription_plan?: string | null;
+  billing_cycle?: string | null;
   user_count?: number;
   active_user_count?: number;
   created_at?: string;
@@ -79,6 +86,20 @@ const statusDotStyles: Record<
   trial: "bg-blue-500",
   suspended: "bg-amber-500",
   expired: "bg-rose-500",
+};
+
+type SubscriptionPayment = {
+  id: number;
+  organization_id: number;
+  plan?: string | null;
+  billing_cycle?: string | null;
+  amount: number;
+  payment_method?: string | null;
+  payment_reference?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  paid_at?: string | null;
+  created_at?: string | null;
 };
 
 function SuperAdminDashboard() {
@@ -126,6 +147,24 @@ function SuperAdminDashboard() {
       email: "",
       address: "",
     });
+
+  const [billingOrganization, setBillingOrganization] =
+    useState<Organization | null>(null);
+  const [paymentHistory, setPaymentHistory] =
+    useState<SubscriptionPayment[]>([]);
+  const [billingLoading, setBillingLoading] =
+    useState(false);
+  const [recordingPayment, setRecordingPayment] =
+    useState(false);
+  const [paymentForm, setPaymentForm] = useState({
+    subscriptionPlan: "starter",
+    billingCycle: "monthly",
+    amount: "",
+    paymentMethod: "mpesa",
+    paymentReference: "",
+    periodStart: new Date().toISOString().slice(0, 10),
+    periodEnd: "",
+  });
 
   const logout = () => {
     localStorage.removeItem("superAdminToken");
@@ -245,6 +284,22 @@ function SuperAdminDashboard() {
         day: "numeric",
       }
     );
+  };
+
+  const formatPaymentMethod = (
+    value?: string | null
+  ) => {
+    const method = String(value || "")
+      .trim()
+      .toLowerCase();
+
+    if (method === "mpesa") return "M-Pesa";
+    if (method === "bank") return "Bank";
+    if (method === "card") return "Card";
+    if (method === "cash") return "Cash";
+    if (method === "other") return "Other";
+
+    return value || "—";
   };
 
   const openAccess = (
@@ -389,6 +444,190 @@ function SuperAdminDashboard() {
       );
     } finally {
       setOnboarding(false);
+    }
+  };
+
+  const calculatePeriodEnd = (
+    periodStart: string,
+    billingCycle: string
+  ) => {
+    if (!periodStart) return "";
+
+    const start = new Date(
+      `${periodStart}T00:00:00`
+    );
+
+    if (Number.isNaN(start.getTime())) {
+      return "";
+    }
+
+    const end = new Date(start);
+
+    if (billingCycle === "monthly") {
+      end.setMonth(end.getMonth() + 1);
+    } else if (
+      billingCycle === "quarterly"
+    ) {
+      end.setMonth(end.getMonth() + 3);
+    } else if (
+      billingCycle === "annual"
+    ) {
+      end.setFullYear(
+        end.getFullYear() + 1
+      );
+    } else {
+      return "";
+    }
+
+    end.setDate(end.getDate() - 1);
+
+    const year = end.getFullYear();
+    const month = String(
+      end.getMonth() + 1
+    ).padStart(2, "0");
+    const day = String(
+      end.getDate()
+    ).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  };
+
+  const openBilling = async (
+    organization: Organization
+  ) => {
+    setBillingOrganization(organization);
+    setError("");
+    setBillingLoading(true);
+    setPaymentHistory([]);
+    const defaultPeriodStart =
+      new Date()
+        .toISOString()
+        .slice(0, 10);
+
+    const defaultBillingCycle =
+      organization.billing_cycle ||
+      "monthly";
+
+    setPaymentForm({
+      subscriptionPlan:
+        organization.subscription_plan ||
+        "starter",
+      billingCycle:
+        defaultBillingCycle,
+      amount: "",
+      paymentMethod: "mpesa",
+      paymentReference: "",
+      periodStart:
+        defaultPeriodStart,
+      periodEnd:
+        calculatePeriodEnd(
+          defaultPeriodStart,
+          defaultBillingCycle
+        ),
+    });
+
+    try {
+      const response = await superAdminFetch(
+        `/api/super-admin/organizations/${organization.id}/subscription-payments`
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Could not load payment history"
+        );
+      }
+
+      setPaymentHistory(
+        Array.isArray(data) ? data : []
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not load payment history."
+      );
+    } finally {
+      setBillingLoading(false);
+    }
+  };
+
+  const recordPayment = async () => {
+    if (!billingOrganization) return;
+
+    const amount = Number(paymentForm.amount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Enter a valid payment amount.");
+      return;
+    }
+
+    if (
+      !paymentForm.periodStart ||
+      !paymentForm.periodEnd
+    ) {
+      setError(
+        "Payment period start and end dates are required."
+      );
+      return;
+    }
+
+    try {
+      setRecordingPayment(true);
+      setError("");
+
+      const response = await superAdminFetch(
+        `/api/super-admin/organizations/${billingOrganization.id}/subscription-payments`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            plan:
+              paymentForm.subscriptionPlan,
+            billingCycle:
+              paymentForm.billingCycle,
+            amount,
+            paymentMethod:
+              paymentForm.paymentMethod,
+            paymentReference:
+              paymentForm.paymentReference ||
+              null,
+            periodStart:
+              paymentForm.periodStart,
+            periodEnd:
+              paymentForm.periodEnd,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Could not record subscription payment"
+        );
+      }
+
+      await loadData(true);
+      await openBilling({
+        ...billingOrganization,
+        status: "active",
+        subscription_plan:
+          paymentForm.subscriptionPlan,
+        billing_cycle:
+          paymentForm.billingCycle,
+        subscription_expires_at:
+          paymentForm.periodEnd,
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not record subscription payment."
+      );
+    } finally {
+      setRecordingPayment(false);
     }
   };
 
@@ -598,6 +837,28 @@ function SuperAdminDashboard() {
               />
               Platform operational
             </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/super-admin/billing")
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100"
+            >
+              <BarChart3 size={17} />
+              Billing & Revenue
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/super-admin/plans")
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-100"
+            >
+              <PackageCheck size={17} />
+              Plans
+            </button>
 
             <button
               type="button"
@@ -858,19 +1119,33 @@ function SuperAdminDashboard() {
                           </td>
 
                           <td className="px-6 py-5 text-right">
-                            <button
-                              onClick={() =>
-                                openAccess(
-                                  organization
-                                )
-                              }
-                              className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-                            >
-                              Manage
-                              <ChevronRight
-                                size={16}
-                              />
-                            </button>
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() =>
+                                  openBilling(
+                                    organization
+                                  )
+                                }
+                                className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                              >
+                                <CreditCard size={16} />
+                                Billing
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  navigate(
+                                    `/super-admin/organizations/${organization.id}`
+                                  )
+                                }
+                                className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                              >
+                                Details
+                                <ChevronRight
+                                  size={16}
+                                />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )
@@ -1267,6 +1542,367 @@ function SuperAdminDashboard() {
                   ? "Creating..."
                   : "Create Organization"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BILLING MODAL */}
+      {billingOrganization && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#071421]/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600">
+                  Subscription Billing
+                </p>
+                <h3 className="mt-1 text-xl font-bold text-[#0B1F33]">
+                  {billingOrganization.name}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Record a subscription payment and review billing history.
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setBillingOrganization(null)
+                }
+                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X size={19} />
+              </button>
+            </div>
+
+            <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1fr_1.15fr]">
+              <div>
+                <h4 className="mb-4 font-bold text-[#0B1F33]">
+                  Record Payment
+                </h4>
+
+                <div className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Plan
+                      </label>
+                      <select
+                        value={paymentForm.subscriptionPlan}
+                        onChange={(e) =>
+                          setPaymentForm((current) => ({
+                            ...current,
+                            subscriptionPlan: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                      >
+                        <option value="starter">Starter</option>
+                        <option value="business">Business</option>
+                        <option value="pro">Pro</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Billing Cycle
+                      </label>
+                      <select
+                        value={paymentForm.billingCycle}
+                        onChange={(e) =>
+                          setPaymentForm((current) => {
+                            const nextCycle =
+                              e.target.value;
+
+                            return {
+                              ...current,
+                              billingCycle:
+                                nextCycle,
+                              periodEnd:
+                                calculatePeriodEnd(
+                                  current.periodStart,
+                                  nextCycle
+                                ),
+                            };
+                          })
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                      >
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="annual">Annual</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Amount (KES)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={paymentForm.amount}
+                      onChange={(e) =>
+                        setPaymentForm((current) => ({
+                          ...current,
+                          amount: e.target.value,
+                        }))
+                      }
+                      placeholder="e.g. 2500"
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                    />
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Payment Method
+                      </label>
+                      <select
+                        value={paymentForm.paymentMethod}
+                        onChange={(e) =>
+                          setPaymentForm((current) => ({
+                            ...current,
+                            paymentMethod: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+                      >
+                        <option value="mpesa">M-Pesa</option>
+                        <option value="cash">Cash</option>
+                        <option value="bank">Bank</option>
+                        <option value="card">Card</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Reference
+                      </label>
+                      <input
+                        value={paymentForm.paymentReference}
+                        onChange={(e) =>
+                          setPaymentForm((current) => ({
+                            ...current,
+                            paymentReference: e.target.value,
+                          }))
+                        }
+                        placeholder="M-Pesa code / receipt"
+                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Period Start
+                      </label>
+                      <input
+                        type="date"
+                        value={paymentForm.periodStart}
+                        onChange={(e) =>
+                          setPaymentForm((current) => {
+                            const nextStart =
+                              e.target.value;
+
+                            return {
+                              ...current,
+                              periodStart:
+                                nextStart,
+                              periodEnd:
+                                calculatePeriodEnd(
+                                  nextStart,
+                                  current.billingCycle
+                                ),
+                            };
+                          })
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Period End
+                      </label>
+                      <input
+                        type="date"
+                        value={paymentForm.periodEnd}
+                        onChange={(e) =>
+                          setPaymentForm((current) => ({
+                            ...current,
+                            periodEnd: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={recordingPayment}
+                    onClick={recordPayment}
+                    className="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {recordingPayment
+                      ? "Recording..."
+                      : "Record Payment & Activate"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 pt-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                      <Clock3 size={21} />
+                    </div>
+
+                    <div>
+                      <h4 className="font-bold text-[#0B1F33]">
+                        Payment History
+                      </h4>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        All subscription payments for this organization
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="shrink-0 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+                    {paymentHistory.length}{" "}
+                    {paymentHistory.length === 1
+                      ? "record"
+                      : "records"}
+                  </span>
+                </div>
+
+                {billingLoading ? (
+                  <p className="py-10 text-center text-sm text-slate-500">
+                    Loading payments...
+                  </p>
+                ) : paymentHistory.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 px-5 py-10 text-center">
+                    <CreditCard
+                      size={28}
+                      className="mx-auto text-slate-300"
+                    />
+                    <p className="mt-3 text-sm font-semibold text-slate-600">
+                      No subscription payments yet
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {paymentHistory.map((payment) => (
+                      <div
+                        key={payment.id}
+                        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.035)]"
+                      >
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                              <CheckCircle2 size={22} />
+                            </div>
+
+                            <div className="min-w-0">
+                              <p className="text-xl font-bold tracking-tight text-[#0B1F33]">
+                                KES{" "}
+                                {Number(payment.amount || 0).toLocaleString(
+                                  "en-KE",
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  }
+                                )}
+                              </p>
+
+                              <p className="mt-1 text-sm text-slate-500">
+                                <span className="font-medium capitalize text-slate-600">
+                                  {payment.plan || "—"} Plan
+                                </span>
+                                <span className="mx-2 text-slate-300">
+                                  •
+                                </span>
+                                <span className="capitalize">
+                                  {payment.billing_cycle || "—"}
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex shrink-0 items-start gap-3 sm:flex-col sm:items-end">
+                            <span className="text-sm font-medium text-slate-500">
+                              {formatDate(
+                                payment.paid_at ||
+                                  payment.created_at
+                              )}
+                            </span>
+
+                            <span className="inline-flex rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                              Completed
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="my-4 border-t border-slate-100" />
+
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 text-slate-400">
+                              <CalendarDays size={18} />
+                            </div>
+
+                            <div>
+                              <p className="text-xs font-medium text-slate-400">
+                                Period
+                              </p>
+                              <p className="mt-1 text-sm font-semibold leading-5 text-slate-700">
+                                {formatDate(payment.period_start)}
+                                {" – "}
+                                {formatDate(payment.period_end)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 text-slate-400">
+                              <Smartphone size={18} />
+                            </div>
+
+                            <div>
+                              <p className="text-xs font-medium text-slate-400">
+                                Payment Method
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-slate-700">
+                                {formatPaymentMethod(
+                                  payment.payment_method
+                                )}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 text-slate-400">
+                              <FileText size={18} />
+                            </div>
+
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-slate-400">
+                                Reference
+                              </p>
+                              <p className="mt-1 break-all text-sm font-semibold text-slate-700">
+                                {payment.payment_reference || "—"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
