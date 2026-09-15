@@ -5,6 +5,82 @@ import type { AuthRequest } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 // ============================================================
+// PLAN ENTITLEMENT ENFORCEMENT
+// Customer & Expense Tracking
+// ============================================================
+
+type ExpenseEntitlementRow = {
+  feature_value: string | null;
+};
+
+function requireExpenseTracking(
+  req: AuthRequest,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  try {
+    const organizationId = req.user?.organizationId;
+
+    if (!organizationId) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const entitlement = db
+      .prepare(`
+        SELECT
+          spf.feature_value
+        FROM organizations o
+        INNER JOIN subscription_plans sp
+          ON LOWER(sp.code) = LOWER(o.subscription_plan)
+        INNER JOIN subscription_plan_features spf
+          ON spf.plan_id = sp.id
+        WHERE o.id = ?
+          AND spf.feature_key = 'customer_expense_tracking'
+          AND sp.is_active = 1
+        LIMIT 1
+      `)
+      .get(organizationId) as ExpenseEntitlementRow | undefined;
+
+    const featureValue =
+      entitlement?.feature_value?.trim().toLowerCase() ?? "";
+
+    const isIncluded =
+      featureValue === "included" ||
+      featureValue === "true" ||
+      featureValue === "1" ||
+      featureValue === "yes";
+
+    if (!isIncluded) {
+      return res.status(403).json({
+        message:
+          "Customer & Expense Tracking is not included in your current subscription plan. Upgrade your subscription to access Expenses.",
+        code: "PLAN_FEATURE_NOT_INCLUDED",
+        feature: "customer_expense_tracking",
+      });
+    }
+
+    next();
+  } catch (error) {
+    console.error(
+      "Expense entitlement check error:",
+      error
+    );
+
+    return res.status(500).json({
+      message:
+        "Failed to verify subscription entitlement",
+    });
+  }
+}
+
+// Every Expenses endpoint below requires the organization's
+// Customer & Expense Tracking entitlement.
+router.use(requireExpenseTracking);
+
+
+// ============================================================
 // CREATE EXPENSE
 // POST /api/expenses
 // ============================================================

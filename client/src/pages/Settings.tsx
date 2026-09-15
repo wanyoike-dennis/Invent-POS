@@ -57,6 +57,9 @@ type StaffUser = {
   email: string;
   role: "admin" | "manager" | "cashier";
   organization_id: number;
+  branch_id: number | null;
+  branch_name: string | null;
+  branch_code: string | null;
   is_active: number;
   created_at: string;
 };
@@ -66,6 +69,23 @@ type StaffForm = {
   email: string;
   password: string;
   role: "manager" | "cashier" | "admin";
+  branchId: string;
+};
+
+type Branch = {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
+};
+
+type StaffSubscription = {
+  planName: string | null;
+  usersIncluded: number | null;
+  activeUsers: number;
+  remainingUsers: number;
+  overLimit: number;
+  canAddUser: boolean;
 };
 
 const emptyStaffForm: StaffForm = {
@@ -73,6 +93,7 @@ const emptyStaffForm: StaffForm = {
   email: "",
   password: "",
   role: "cashier",
+  branchId: "",
 };
 
 function Settings() {
@@ -103,6 +124,8 @@ function Settings() {
     useState("");
 
   const [staff, setStaff] = useState<StaffUser[]>([]);
+  const [staffSubscription, setStaffSubscription] =
+    useState<StaffSubscription | null>(null);
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffBusy, setStaffBusy] = useState(false);
   const [staffError, setStaffError] = useState("");
@@ -115,6 +138,8 @@ function Settings() {
   const [staffForm, setStaffForm] =
     useState<StaffForm>(emptyStaffForm);
   const [newPassword, setNewPassword] = useState("");
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
 
   const fetchOrganization = async () => {
     try {
@@ -178,7 +203,33 @@ function Settings() {
         );
       }
 
-      setStaff(Array.isArray(data) ? data : []);
+      // New API shape: { users, subscription }.
+      // The Array fallback keeps this page compatible with an older backend
+      // during development/restarts.
+      if (Array.isArray(data)) {
+        setStaff(data);
+        setStaffSubscription(null);
+      } else {
+        setStaff(Array.isArray(data.users) ? data.users : []);
+        setStaffSubscription(
+          data.subscription
+            ? {
+                planName: data.subscription.planName ?? null,
+                usersIncluded:
+                  data.subscription.usersIncluded === null ||
+                  data.subscription.usersIncluded === undefined
+                    ? null
+                    : Number(data.subscription.usersIncluded),
+                activeUsers: Number(data.subscription.activeUsers || 0),
+                remainingUsers: Number(
+                  data.subscription.remainingUsers || 0
+                ),
+                overLimit: Number(data.subscription.overLimit || 0),
+                canAddUser: Boolean(data.subscription.canAddUser),
+              }
+            : null
+        );
+      }
     } catch (error) {
       setStaffError(
         error instanceof Error
@@ -190,11 +241,41 @@ function Settings() {
     }
   };
 
+  const fetchBranches = async () => {
+    if (!isAdmin) return;
+
+    try {
+      setBranchesLoading(true);
+
+      const response = await apiFetch("/api/branches");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to load branches");
+      }
+
+      setBranches(
+        (Array.isArray(data.branches) ? data.branches : []).filter(
+          (branch: Branch) => Number(branch.is_active) === 1
+        )
+      );
+    } catch (error) {
+      setStaffError(
+        error instanceof Error
+          ? error.message
+          : "Could not load organization branches."
+      );
+    } finally {
+      setBranchesLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchOrganization();
 
     if (isAdmin) {
       fetchStaff();
+      fetchBranches();
     }
   }, []);
 
@@ -327,8 +408,24 @@ function Settings() {
   const openAddStaff = () => {
     setStaffError("");
     setStaffMessage("");
+
+    if (staffSubscription && !staffSubscription.canAddUser) {
+      const planName = staffSubscription.planName || "current";
+      const limit = staffSubscription.usersIncluded;
+
+      setStaffError(
+        limit
+          ? `Your ${planName} plan allows up to ${limit} active users. Deactivate a user or upgrade your subscription to add more users.`
+          : "Your current subscription does not allow another active user."
+      );
+      return;
+    }
+
     setEditingStaff(null);
-    setStaffForm(emptyStaffForm);
+    setStaffForm({
+      ...emptyStaffForm,
+      branchId: branches.length > 0 ? String(branches[0].id) : "",
+    });
     setShowAddStaff(true);
   };
 
@@ -342,6 +439,7 @@ function Settings() {
       email: user.email,
       password: "",
       role: user.role,
+      branchId: user.branch_id ? String(user.branch_id) : "",
     });
   };
 
@@ -361,6 +459,13 @@ function Settings() {
 
     if (!name || !email) {
       setStaffError("Name and email are required.");
+      return;
+    }
+
+    const branchId = Number(staffForm.branchId);
+
+    if (!Number.isInteger(branchId) || branchId <= 0) {
+      setStaffError("Please select a branch for this staff member.");
       return;
     }
 
@@ -388,12 +493,14 @@ function Settings() {
                   name,
                   email,
                   role: staffForm.role,
+                  branchId,
                 }
               : {
                   name,
                   email,
                   password: staffForm.password,
                   role: staffForm.role,
+                  branchId,
                 }
           ),
         }
@@ -961,7 +1068,20 @@ function Settings() {
               <button
                 type="button"
                 onClick={openAddStaff}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#246BFD] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1D5EEA]"
+                disabled={
+                  staffLoading ||
+                  Boolean(
+                    staffSubscription &&
+                      !staffSubscription.canAddUser
+                  )
+                }
+                title={
+                  staffSubscription &&
+                  !staffSubscription.canAddUser
+                    ? "User limit reached for this subscription plan"
+                    : "Add a staff member"
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#246BFD] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1D5EEA] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
               >
                 <UserPlus size={17} />
                 Add Staff
@@ -969,6 +1089,89 @@ function Settings() {
             </div>
 
             <div className="p-5">
+              {staffSubscription && (
+                <div
+                  className={`mb-5 rounded-2xl border p-4 ${
+                    staffSubscription.overLimit > 0
+                      ? "border-amber-200 bg-amber-50"
+                      : !staffSubscription.canAddUser
+                        ? "border-blue-200 bg-blue-50"
+                        : "border-slate-200 bg-slate-50"
+                  }`}
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#246BFD]">
+                        Plan Usage
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <h3 className="text-lg font-bold text-[#071827]">
+                          {staffSubscription.planName || "Subscription"} Plan
+                        </h3>
+                        <span className="text-sm font-medium text-slate-600">
+                          {staffSubscription.activeUsers}
+                          {" / "}
+                          {staffSubscription.usersIncluded ?? "—"} active users
+                        </span>
+                      </div>
+                    </div>
+
+                    {staffSubscription.usersIncluded !== null && (
+                      <div className="min-w-[180px]">
+                        <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-slate-500">
+                          <span>User capacity</span>
+                          <span>
+                            {staffSubscription.activeUsers} /{" "}
+                            {staffSubscription.usersIncluded}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            className={`h-full rounded-full ${
+                              staffSubscription.overLimit > 0
+                                ? "bg-amber-500"
+                                : staffSubscription.canAddUser
+                                  ? "bg-[#246BFD]"
+                                  : "bg-blue-500"
+                            }`}
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                (staffSubscription.activeUsers /
+                                  Math.max(
+                                    staffSubscription.usersIncluded,
+                                    1
+                                  )) *
+                                  100
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {staffSubscription.overLimit > 0 ? (
+                    <div className="mt-3 rounded-xl border border-amber-200 bg-white/70 px-3.5 py-3 text-sm text-amber-800">
+                      <span className="font-semibold">
+                        {staffSubscription.overLimit} user
+                        {staffSubscription.overLimit === 1 ? "" : "s"} over your plan limit.
+                      </span>{" "}
+                      Deactivate a user or upgrade your subscription before adding or reactivating staff.
+                    </div>
+                  ) : !staffSubscription.canAddUser ? (
+                    <div className="mt-3 rounded-xl border border-blue-200 bg-white/70 px-3.5 py-3 text-sm text-blue-800">
+                      You have used all users included in your plan. Deactivate a user or upgrade your subscription to add another.
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-600">
+                      {staffSubscription.remainingUsers} active user
+                      {staffSubscription.remainingUsers === 1 ? "" : "s"} remaining on your current plan.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {staffError && (
                 <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
                   {staffError}
@@ -1082,6 +1285,46 @@ function Settings() {
                         <option value="admin">Admin</option>
                       </select>
                     </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        Branch
+                      </label>
+                      <div className="relative">
+                        <MapPin
+                          size={17}
+                          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                        />
+                        <select
+                          value={staffForm.branchId}
+                          disabled={branchesLoading || branches.length === 0}
+                          onChange={(e) =>
+                            setStaffForm((current) => ({
+                              ...current,
+                              branchId: e.target.value,
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-10 pr-4 outline-none focus:border-[#246BFD] focus:ring-2 focus:ring-[#246BFD]/15 disabled:cursor-not-allowed disabled:bg-slate-100"
+                        >
+                          <option value="">
+                            {branchesLoading
+                              ? "Loading branches..."
+                              : "Select branch"}
+                          </option>
+                          {branches.map((branch) => (
+                            <option key={branch.id} value={branch.id}>
+                              {branch.name}
+                              {branch.code ? ` (${branch.code})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {branches.length === 0 && !branchesLoading && (
+                        <p className="mt-2 text-xs text-amber-700">
+                          No active branches are available. Create or reactivate a branch first.
+                        </p>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-4 flex justify-end gap-3">
@@ -1095,7 +1338,7 @@ function Settings() {
 
                     <button
                       type="submit"
-                      disabled={staffBusy}
+                      disabled={staffBusy || branchesLoading || branches.length === 0}
                       className="rounded-xl bg-[#246BFD] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#1D5EEA] disabled:opacity-50"
                     >
                       {staffBusy
@@ -1176,6 +1419,7 @@ function Settings() {
                       <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
                         <th className="px-3 py-3">User</th>
                         <th className="px-3 py-3">Role</th>
+                        <th className="px-3 py-3">Branch</th>
                         <th className="px-3 py-3">Status</th>
                         <th className="px-3 py-3">Created</th>
                         <th className="px-3 py-3 text-right">Actions</th>
@@ -1200,6 +1444,22 @@ function Settings() {
                             <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
                               {user.role}
                             </span>
+                          </td>
+
+                          <td className="px-3 py-4">
+                            <div className="flex items-center gap-2 text-sm text-slate-600">
+                              <MapPin size={15} className="shrink-0 text-[#246BFD]" />
+                              <div>
+                                <p className="font-medium text-slate-700">
+                                  {user.branch_name || "Unassigned"}
+                                </p>
+                                {user.branch_code && (
+                                  <p className="mt-0.5 text-xs text-slate-400">
+                                    {user.branch_code}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
                           </td>
 
                           <td className="px-3 py-4">

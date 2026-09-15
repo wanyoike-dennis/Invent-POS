@@ -14,6 +14,136 @@ const JWT_SECRET =
   process.env.JWT_SECRET || "invent-pos-secret-key";
 
 
+
+type PlanUserLimitRow = {
+  plan_name: string;
+  users_included: string | null;
+};
+
+const getOrganizationUserLimit = (organizationId: number) => {
+  const row = db.prepare(`
+    SELECT
+      sp.name AS plan_name,
+      spf.feature_value AS users_included
+    FROM organizations o
+    INNER JOIN subscription_plans sp
+      ON (
+        LOWER(sp.code) = LOWER(TRIM(o.subscription_plan))
+        OR LOWER(sp.name) = LOWER(TRIM(o.subscription_plan))
+      )
+    INNER JOIN subscription_plan_features spf
+      ON spf.plan_id = sp.id
+      AND spf.feature_key = 'users_included'
+    WHERE o.id = ?
+      AND o.subscription_plan IS NOT NULL
+      AND TRIM(o.subscription_plan) <> ''
+    LIMIT 1
+  `).get(organizationId) as PlanUserLimitRow | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  const userLimit = Number(row.users_included);
+
+  if (!Number.isInteger(userLimit) || userLimit <= 0) {
+    return null;
+  }
+
+  return {
+    planName: row.plan_name,
+    userLimit,
+  };
+};
+
+const getActiveOrganizationUserCount = (organizationId: number) => {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM users
+    WHERE organization_id = ?
+      AND is_active = 1
+  `).get(organizationId) as { count: number };
+
+  return Number(row.count || 0);
+};
+
+const enforceOrganizationUserLimit = (organizationId: number) => {
+  const entitlement = getOrganizationUserLimit(organizationId);
+
+  if (!entitlement) {
+    return {
+      allowed: false,
+      status: 403,
+      message:
+        "Your organization does not have an active user-limit entitlement. Contact Invent POS support.",
+    };
+  }
+
+  const activeUsers = getActiveOrganizationUserCount(organizationId);
+
+  if (activeUsers >= entitlement.userLimit) {
+    return {
+      allowed: false,
+      status: 403,
+      message: `Your ${entitlement.planName} plan allows up to ${entitlement.userLimit} active users. Upgrade your subscription to add more users.`,
+    };
+  }
+
+  return {
+    allowed: true,
+    status: 200,
+    message: "",
+  };
+};
+
+
+type OrganizationBranchRow = {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
+};
+
+const getOrganizationBranch = (
+  organizationId: number,
+  branchId: number
+) => {
+  return db.prepare(`
+    SELECT
+      id,
+      name,
+      code,
+      is_active
+    FROM branches
+    WHERE id = ?
+      AND organization_id = ?
+    LIMIT 1
+  `).get(branchId, organizationId) as
+    | OrganizationBranchRow
+    | undefined;
+};
+
+const getMainOrganizationBranch = (organizationId: number) => {
+  return db.prepare(`
+    SELECT
+      id,
+      name,
+      code,
+      is_active
+    FROM branches
+    WHERE organization_id = ?
+    ORDER BY
+      CASE
+        WHEN UPPER(COALESCE(code, '')) = 'MAIN' THEN 0
+        ELSE 1
+      END,
+      id ASC
+    LIMIT 1
+  `).get(organizationId) as
+    | OrganizationBranchRow
+    | undefined;
+};
+
 const createOrganizationSlug = (name: string) => {
   const base =
     name
@@ -118,6 +248,27 @@ router.post("/register", async (req, res) => {
           organizationResult.lastInsertRowid
         );
 
+        db.prepare(`
+          INSERT INTO branches (
+            organization_id,
+            name,
+            code,
+            is_active
+          )
+          SELECT ?, 'Main Branch', 'MAIN', 1
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM branches
+            WHERE organization_id = ?
+          )
+        `).run(organizationId, organizationId);
+
+        const mainBranch = getMainOrganizationBranch(organizationId);
+
+        if (!mainBranch) {
+          throw new Error("Failed to create or find the organization's Main Branch");
+        }
+
         const userResult = db
           .prepare(`
             INSERT INTO users (
@@ -125,16 +276,18 @@ router.post("/register", async (req, res) => {
               email,
               password,
               role,
-              organization_id
+              organization_id,
+              branch_id
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
           `)
           .run(
             String(name).trim(),
             normalizedEmail,
             hashedPassword,
             "admin",
-            organizationId
+            organizationId,
+            mainBranch.id
           );
 
         return {
@@ -165,6 +318,125 @@ router.post("/register", async (req, res) => {
 
 
 // ============================================================
+// GET ORGANIZATION SUBSCRIPTION ENTITLEMENTS
+// Authenticated organization users
+// ============================================================
+
+router.get(
+  "/entitlements",
+  authenticateToken,
+  (req: AuthRequest, res) => {
+    const organizationId = req.user?.organizationId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        message: "Organization context is missing. Please log in again.",
+      });
+    }
+
+    try {
+      const plan = db.prepare(`
+        SELECT
+          sp.id,
+          sp.name,
+          sp.code
+        FROM organizations o
+        INNER JOIN subscription_plans sp
+          ON (
+            LOWER(sp.code) = LOWER(TRIM(o.subscription_plan))
+            OR LOWER(sp.name) = LOWER(TRIM(o.subscription_plan))
+          )
+        WHERE o.id = ?
+          AND o.subscription_plan IS NOT NULL
+          AND TRIM(o.subscription_plan) <> ''
+        LIMIT 1
+      `).get(organizationId) as
+        | {
+            id: number;
+            name: string;
+            code: string;
+          }
+        | undefined;
+
+      if (!plan) {
+        return res.status(404).json({
+          message:
+            "No subscription plan is assigned to this organization.",
+        });
+      }
+
+      const featureRows = db.prepare(`
+        SELECT
+          feature_key,
+          feature_value
+        FROM subscription_plan_features
+        WHERE plan_id = ?
+        ORDER BY feature_key ASC
+      `).all(plan.id) as Array<{
+        feature_key: string;
+        feature_value: string | null;
+      }>;
+
+      const parseFeatureValue = (
+        value: string | null
+      ): string | number | boolean | null => {
+        if (value === null) {
+          return null;
+        }
+
+        const trimmed = String(value).trim();
+        const lowered = trimmed.toLowerCase();
+
+        if (lowered === "true") {
+          return true;
+        }
+
+        if (lowered === "false") {
+          return false;
+        }
+
+        if (
+          trimmed !== "" &&
+          /^-?\d+(?:\.\d+)?$/.test(trimmed)
+        ) {
+          return Number(trimmed);
+        }
+
+        return trimmed;
+      };
+
+      const features = featureRows.reduce<
+        Record<string, string | number | boolean | null>
+      >((result, feature) => {
+        result[feature.feature_key] =
+          parseFeatureValue(feature.feature_value);
+
+        return result;
+      }, {});
+
+      return res.json({
+        plan: {
+          id: plan.id,
+          name: plan.name,
+          code: plan.code,
+        },
+        features,
+      });
+    } catch (error) {
+      console.error(
+        "Fetch organization entitlements error:",
+        error
+      );
+
+      return res.status(500).json({
+        message: "Failed to fetch subscription entitlements",
+      });
+    }
+  }
+);
+
+
+// ============================================================
 // CREATE STAFF USER
 // Admin only
 // ============================================================
@@ -174,11 +446,19 @@ router.post(
   authenticateToken,
   authorizeRoles("admin"),
   async (req: AuthRequest, res) => {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, branchId } = req.body;
 
-    if (!name || !email || !password || !role) {
+    if (!name || !email || !password || !role || branchId === undefined || branchId === null || branchId === "") {
       return res.status(400).json({
-        message: "Name, email, password and role are required",
+        message: "Name, email, password, role and branch are required",
+      });
+    }
+
+    const normalizedBranchId = Number(branchId);
+
+    if (!Number.isInteger(normalizedBranchId) || normalizedBranchId <= 0) {
+      return res.status(400).json({
+        message: "A valid branch is required",
       });
     }
 
@@ -213,11 +493,6 @@ router.post(
         });
       }
 
-      const hashedPassword = await bcrypt.hash(
-        String(password),
-        10
-      );
-
       const organizationId =
         req.user?.organizationId;
 
@@ -228,6 +503,38 @@ router.post(
         });
       }
 
+      const selectedBranch = getOrganizationBranch(
+        organizationId,
+        normalizedBranchId
+      );
+
+      if (!selectedBranch) {
+        return res.status(400).json({
+          message: "The selected branch does not belong to your organization",
+        });
+      }
+
+      if (Number(selectedBranch.is_active) !== 1) {
+        return res.status(400).json({
+          message: "Staff cannot be assigned to an inactive branch",
+        });
+      }
+
+      const limitCheck = enforceOrganizationUserLimit(
+        organizationId
+      );
+
+      if (!limitCheck.allowed) {
+        return res.status(limitCheck.status).json({
+          message: limitCheck.message,
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(
+        String(password),
+        10
+      );
+
       const result = db
         .prepare(`
           INSERT INTO users (
@@ -235,16 +542,18 @@ router.post(
             email,
             password,
             role,
-            organization_id
+            organization_id,
+            branch_id
           )
-          VALUES (?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?)
         `)
         .run(
           String(name).trim(),
           normalizedEmail,
           hashedPassword,
           normalizedRole,
-          organizationId
+          organizationId,
+          normalizedBranchId
         );
 
       const createdUser = db
@@ -255,6 +564,19 @@ router.post(
             email,
             role,
             organization_id,
+            branch_id,
+            (
+              SELECT b.name
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_name,
+            (
+              SELECT b.code
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_code,
             is_active,
             created_at
           FROM users
@@ -297,6 +619,19 @@ router.get(
             email,
             role,
             organization_id,
+            branch_id,
+            (
+              SELECT b.name
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_name,
+            (
+              SELECT b.code
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_code,
             is_active,
             created_at
           FROM users
@@ -312,7 +647,29 @@ router.get(
         `)
         .all(organizationId);
 
-      return res.json(users);
+      const entitlement = getOrganizationUserLimit(organizationId);
+      const activeUsers = getActiveOrganizationUserCount(organizationId);
+
+      return res.json({
+        users,
+        subscription: entitlement
+          ? {
+              planName: entitlement.planName,
+              usersIncluded: entitlement.userLimit,
+              activeUsers,
+              remainingUsers: Math.max(entitlement.userLimit - activeUsers, 0),
+              overLimit: Math.max(activeUsers - entitlement.userLimit, 0),
+              canAddUser: activeUsers < entitlement.userLimit,
+            }
+          : {
+              planName: null,
+              usersIncluded: null,
+              activeUsers,
+              remainingUsers: 0,
+              overLimit: 0,
+              canAddUser: false,
+            },
+      });
     } catch (error) {
       console.error("List organization users error:", error);
 
@@ -335,7 +692,7 @@ router.put(
   (req: AuthRequest, res) => {
     const organizationId = req.user!.organizationId;
     const userId = Number(req.params.id);
-    const { name, email, role } = req.body;
+    const { name, email, role, branchId } = req.body;
 
     if (!Number.isInteger(userId) || userId <= 0) {
       return res.status(400).json({
@@ -343,9 +700,17 @@ router.put(
       });
     }
 
-    if (!name || !email || !role) {
+    if (!name || !email || !role || branchId === undefined || branchId === null || branchId === "") {
       return res.status(400).json({
-        message: "Name, email and role are required",
+        message: "Name, email, role and branch are required",
+      });
+    }
+
+    const normalizedBranchId = Number(branchId);
+
+    if (!Number.isInteger(normalizedBranchId) || normalizedBranchId <= 0) {
+      return res.status(400).json({
+        message: "A valid branch is required",
       });
     }
 
@@ -387,6 +752,23 @@ router.put(
         });
       }
 
+      const selectedBranch = getOrganizationBranch(
+        organizationId,
+        normalizedBranchId
+      );
+
+      if (!selectedBranch) {
+        return res.status(400).json({
+          message: "The selected branch does not belong to your organization",
+        });
+      }
+
+      if (Number(selectedBranch.is_active) !== 1) {
+        return res.status(400).json({
+          message: "Staff cannot be assigned to an inactive branch",
+        });
+      }
+
       const emailOwner = db
         .prepare(`
           SELECT id
@@ -407,13 +789,15 @@ router.put(
         SET
           name = ?,
           email = ?,
-          role = ?
+          role = ?,
+          branch_id = ?
         WHERE id = ?
           AND organization_id = ?
       `).run(
         String(name).trim(),
         normalizedEmail,
         normalizedRole,
+        normalizedBranchId,
         userId,
         organizationId
       );
@@ -426,6 +810,19 @@ router.put(
             email,
             role,
             organization_id,
+            branch_id,
+            (
+              SELECT b.name
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_name,
+            (
+              SELECT b.code
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_code,
             is_active,
             created_at
           FROM users
@@ -577,6 +974,21 @@ router.put(
         });
       }
 
+      const isCurrentlyActive =
+        Number(targetUser.is_active) === 1;
+
+      if (isActive && !isCurrentlyActive) {
+        const limitCheck = enforceOrganizationUserLimit(
+          organizationId
+        );
+
+        if (!limitCheck.allowed) {
+          return res.status(limitCheck.status).json({
+            message: limitCheck.message,
+          });
+        }
+      }
+
       db.prepare(`
         UPDATE users
         SET is_active = ?
@@ -596,6 +1008,19 @@ router.put(
             email,
             role,
             organization_id,
+            branch_id,
+            (
+              SELECT b.name
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_name,
+            (
+              SELECT b.code
+              FROM branches b
+              WHERE b.id = users.branch_id
+                AND b.organization_id = users.organization_id
+            ) AS branch_code,
             is_active,
             created_at
           FROM users
@@ -641,7 +1066,11 @@ router.post("/login", async (req, res) => {
         users.password,
         users.role,
         users.organization_id,
+        users.branch_id,
         users.is_active,
+        branches.name AS branch_name,
+        branches.code AS branch_code,
+        branches.is_active AS branch_is_active,
         organizations.name AS organization_name,
         organizations.slug AS organization_slug,
         organizations.currency AS organization_currency,
@@ -651,6 +1080,9 @@ router.post("/login", async (req, res) => {
       FROM users
       LEFT JOIN organizations
         ON organizations.id = users.organization_id
+      LEFT JOIN branches
+        ON branches.id = users.branch_id
+        AND branches.organization_id = users.organization_id
       WHERE users.email = ?
     `)
     .get(email.trim().toLowerCase()) as
@@ -661,7 +1093,11 @@ router.post("/login", async (req, res) => {
         password: string;
         role: string;
         organization_id: number | null;
+        branch_id: number | null;
         is_active: number;
+        branch_name: string | null;
+        branch_code: string | null;
+        branch_is_active: number | null;
         organization_name: string | null;
         organization_slug: string | null;
         organization_currency: string | null;
@@ -681,6 +1117,20 @@ router.post("/login", async (req, res) => {
     return res.status(403).json({
       message:
         "This user is not assigned to an organization.",
+    });
+  }
+
+  if (!user.branch_id) {
+    return res.status(403).json({
+      message:
+        "This account is not assigned to a branch. Contact your organization Admin.",
+    });
+  }
+
+  if (Number(user.branch_is_active) !== 1) {
+    return res.status(403).json({
+      message:
+        "Your assigned branch is inactive. Contact your organization Admin.",
     });
   }
 
@@ -765,6 +1215,7 @@ router.post("/login", async (req, res) => {
       email: user.email,
       role: user.role,
       organizationId: user.organization_id,
+      branchId: user.branch_id,
     },
     JWT_SECRET,
     {
@@ -781,6 +1232,12 @@ router.post("/login", async (req, res) => {
       email: user.email,
       role: user.role,
       organizationId: user.organization_id,
+      branchId: user.branch_id,
+      branch: {
+        id: user.branch_id,
+        name: user.branch_name || "Branch",
+        code: user.branch_code || "",
+      },
       organization: {
         id: user.organization_id,
         name:

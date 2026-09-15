@@ -635,6 +635,107 @@ db.exec(`
 `);
 
 // ==========================================================
+// BRANCHES / MULTI-BRANCH FOUNDATION
+// Every branch belongs to one organization. Existing organizations
+// receive one Main Branch so current installations remain usable.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS branches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    code TEXT,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1
+      CHECK (is_active IN (0, 1)),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_branches_organization
+    ON branches(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_branches_active
+    ON branches(organization_id, is_active);
+`);
+
+// ==========================================================
+// STAFF / BRANCH ASSIGNMENT
+// Existing users are assigned to their organization's Main Branch.
+// ==========================================================
+
+const userBranchColumns = db
+  .prepare("PRAGMA table_info(users)")
+  .all() as { name: string }[];
+
+if (!userBranchColumns.some((column) => column.name === "branch_id")) {
+  db.exec(`
+    ALTER TABLE users
+    ADD COLUMN branch_id INTEGER
+      REFERENCES branches(id)
+  `);
+}
+
+db.exec(`
+  UPDATE users
+  SET branch_id = (
+    SELECT b.id
+    FROM branches b
+    WHERE b.organization_id = users.organization_id
+    ORDER BY
+      CASE WHEN UPPER(COALESCE(b.code, '')) = 'MAIN' THEN 0 ELSE 1 END,
+      b.id ASC
+    LIMIT 1
+  )
+  WHERE branch_id IS NULL
+    AND organization_id IS NOT NULL
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_users_branch
+    ON users(branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_users_organization_branch
+    ON users(organization_id, branch_id);
+`);
+
+// A branch code only needs to be unique inside its organization.
+// SQLite allows multiple NULL values in a UNIQUE index, so code remains optional.
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_org_code_unique
+    ON branches(organization_id, code)
+    WHERE code IS NOT NULL AND TRIM(code) <> '';
+`);
+
+// Create a Main Branch only for organizations that do not have any branch yet.
+// This is safe to run on every backend start and does not consume extra capacity
+// for organizations that already have branch records.
+db.exec(`
+  INSERT INTO branches (
+    organization_id,
+    name,
+    code,
+    is_active
+  )
+  SELECT
+    o.id,
+    'Main Branch',
+    'MAIN',
+    1
+  FROM organizations o
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM branches b
+    WHERE b.organization_id = o.id
+  );
+`);
+
+// ==========================================================
 // COST PRICE / COGS MIGRATIONS
 // Adds the new columns safely to existing databases.
 // Existing records start at 0 until their historical costs
@@ -967,6 +1068,141 @@ seedPrice("business", "annual", 20000);
 seedPrice("pro", "monthly", 3500);
 seedPrice("pro", "quarterly", 9500);
 seedPrice("pro", "annual", 35000);
+
+
+// ==========================================================
+// SUBSCRIPTION PLAN FEATURES / ENTITLEMENTS
+// Defines what each platform plan includes. These values are
+// descriptive entitlements only for now; POS enforcement comes later.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS subscription_plan_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    feature_key TEXT NOT NULL,
+    feature_label TEXT NOT NULL,
+    feature_value TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (plan_id)
+      REFERENCES subscription_plans(id),
+    UNIQUE (plan_id, feature_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_subscription_plan_features_plan
+    ON subscription_plan_features(plan_id);
+`);
+
+const seedPlanFeature = db.prepare(`
+  INSERT OR IGNORE INTO subscription_plan_features (
+    plan_id,
+    feature_key,
+    feature_label,
+    feature_value,
+    sort_order
+  )
+  SELECT id, ?, ?, ?, ?
+  FROM subscription_plans
+  WHERE code = ?
+`);
+
+const planFeatureSeeds = [
+  ["starter", "branches_included", "Branches included", "1", 10],
+  ["starter", "users_included", "Users included", "2", 20],
+  ["starter", "sales_inventory", "Sales, receipts & inventory", "included", 30],
+  ["starter", "mpesa_recording", "M-Pesa payment recording", "included", 40],
+  ["starter", "customer_expense_tracking", "Customer & expense tracking", "not_included", 50],
+  ["starter", "staff_roles", "Staff roles & permissions", "Basic", 60],
+  ["starter", "multi_branch_reports", "Multi-branch reports", "not_included", 70],
+  ["starter", "audit_analytics", "Audit logs & advanced analytics", "not_included", 80],
+  ["starter", "support", "Support", "Standard", 90],
+
+  ["business", "branches_included", "Branches included", "Extra branches included", 10],
+  ["business", "users_included", "Users included", "Extra users included", 20],
+  ["business", "sales_inventory", "Sales, receipts & inventory", "included", 30],
+  ["business", "mpesa_recording", "M-Pesa payment recording", "included", 40],
+  ["business", "customer_expense_tracking", "Customer & expense tracking", "included", 50],
+  ["business", "staff_roles", "Staff roles & permissions", "Advanced", 60],
+  ["business", "multi_branch_reports", "Multi-branch reports", "included", 70],
+  ["business", "audit_analytics", "Audit logs & advanced analytics", "not_included", 80],
+  ["business", "support", "Support", "Priority", 90],
+
+  ["pro", "branches_included", "Branches included", "Extra branches included", 10],
+  ["pro", "users_included", "Users included", "Extra users included", 20],
+  ["pro", "sales_inventory", "Sales, receipts & inventory", "included", 30],
+  ["pro", "mpesa_recording", "M-Pesa payment recording", "included", 40],
+  ["pro", "customer_expense_tracking", "Customer & expense tracking", "included", 50],
+  ["pro", "staff_roles", "Staff roles & permissions", "Advanced", 60],
+  ["pro", "multi_branch_reports", "Multi-branch reports", "included", 70],
+  ["pro", "audit_analytics", "Audit logs & advanced analytics", "included", 80],
+  ["pro", "support", "Support", "Dedicated", 90],
+] as const;
+
+for (const [planCode, key, label, value, sortOrder] of planFeatureSeeds) {
+  seedPlanFeature.run(key, label, value, sortOrder, planCode);
+}
+
+
+// One-time normalization of the original descriptive limits.
+// The WHERE clause only changes the old seed wording, so later Super Admin
+// edits are preserved on future restarts.
+db.prepare(`
+  UPDATE subscription_plan_features
+  SET
+    feature_value = '3',
+    updated_at = CURRENT_TIMESTAMP
+  WHERE plan_id = (
+    SELECT id
+    FROM subscription_plans
+    WHERE code = 'business'
+  )
+    AND feature_key = 'branches_included'
+    AND feature_value = 'Extra branches included'
+`).run();
+
+db.prepare(`
+  UPDATE subscription_plan_features
+  SET
+    feature_value = '10',
+    updated_at = CURRENT_TIMESTAMP
+  WHERE plan_id = (
+    SELECT id
+    FROM subscription_plans
+    WHERE code = 'business'
+  )
+    AND feature_key = 'users_included'
+    AND feature_value = 'Extra users included'
+`).run();
+
+db.prepare(`
+  UPDATE subscription_plan_features
+  SET
+    feature_value = '10',
+    updated_at = CURRENT_TIMESTAMP
+  WHERE plan_id = (
+    SELECT id
+    FROM subscription_plans
+    WHERE code = 'pro'
+  )
+    AND feature_key = 'branches_included'
+    AND feature_value = 'Extra branches included'
+`).run();
+
+db.prepare(`
+  UPDATE subscription_plan_features
+  SET
+    feature_value = '30',
+    updated_at = CURRENT_TIMESTAMP
+  WHERE plan_id = (
+    SELECT id
+    FROM subscription_plans
+    WHERE code = 'pro'
+  )
+    AND feature_key = 'users_included'
+    AND feature_value = 'Extra users included'
+`).run();
 
 
 const insertCategory = db.prepare(`

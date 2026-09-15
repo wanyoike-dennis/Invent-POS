@@ -648,6 +648,19 @@ router.post(
 // Platform-owned plan metadata and active pricing.
 // ============================================================
 
+const planFeatureStatement = db.prepare(`
+  SELECT
+    id,
+    plan_id,
+    feature_key,
+    feature_label,
+    feature_value,
+    sort_order
+  FROM subscription_plan_features
+  WHERE plan_id = ?
+  ORDER BY sort_order ASC, id ASC
+`);
+
 router.get("/plans", (_req, res) => {
   try {
     const plans = db
@@ -715,6 +728,7 @@ router.get("/plans", (_req, res) => {
           ...price,
           is_active: Boolean(price.is_active),
         })),
+      features: planFeatureStatement.all(plan.id),
     }));
 
     return res.json(result);
@@ -808,10 +822,13 @@ router.get("/plans/:id", (req, res) => {
         is_active: Boolean(price.is_active),
       }));
 
+    const features = planFeatureStatement.all(planId);
+
     return res.json({
       ...plan,
       is_active: Boolean(plan.is_active),
       prices,
+      features,
     });
   } catch (error) {
     console.error(
@@ -843,6 +860,7 @@ router.put("/plans/:id", (req, res) => {
     description,
     isActive,
     prices,
+    features,
   } = req.body;
 
   const cleanName = String(
@@ -895,6 +913,112 @@ router.put("/plans/:id", (req, res) => {
           `${cycle} price must be greater than 0`,
       });
     }
+  }
+
+  const normalizedFeatures =
+    features &&
+    typeof features === "object"
+      ? Object.fromEntries(
+          Object.entries(features).map(
+            ([key, value]) => [
+              String(key).trim(),
+              String(value ?? "").trim(),
+            ]
+          )
+        )
+      : {};
+
+  const requiredFeatureKeys = [
+    "branches_included",
+    "users_included",
+    "sales_inventory",
+    "mpesa_recording",
+    "customer_expense_tracking",
+    "staff_roles",
+    "multi_branch_reports",
+    "audit_analytics",
+    "support",
+  ];
+
+  for (const key of requiredFeatureKeys) {
+    if (!normalizedFeatures[key]) {
+      return res.status(400).json({
+        message: `Feature value is required for ${key}`,
+      });
+    }
+  }
+
+  const branchesIncluded = Number(
+    normalizedFeatures.branches_included
+  );
+  const usersIncluded = Number(
+    normalizedFeatures.users_included
+  );
+
+  if (
+    !Number.isInteger(branchesIncluded) ||
+    branchesIncluded < 1
+  ) {
+    return res.status(400).json({
+      message:
+        "Branches included must be a whole number greater than 0",
+    });
+  }
+
+  if (
+    !Number.isInteger(usersIncluded) ||
+    usersIncluded < 1
+  ) {
+    return res.status(400).json({
+      message:
+        "Users included must be a whole number greater than 0",
+    });
+  }
+
+  const inclusionValues = new Set([
+    "included",
+    "not_included",
+  ]);
+
+  for (const key of [
+    "sales_inventory",
+    "mpesa_recording",
+    "customer_expense_tracking",
+    "multi_branch_reports",
+    "audit_analytics",
+  ]) {
+    if (
+      !inclusionValues.has(
+        normalizedFeatures[key]
+      )
+    ) {
+      return res.status(400).json({
+        message:
+          `${key} must be included or not_included`,
+      });
+    }
+  }
+
+  if (
+    !["Basic", "Advanced"].includes(
+      normalizedFeatures.staff_roles
+    )
+  ) {
+    return res.status(400).json({
+      message:
+        "Staff roles must be Basic or Advanced",
+    });
+  }
+
+  if (
+    !["Standard", "Priority", "Dedicated"].includes(
+      normalizedFeatures.support
+    )
+  ) {
+    return res.status(400).json({
+      message:
+        "Support must be Standard, Priority or Dedicated",
+    });
   }
 
   try {
@@ -1017,6 +1141,29 @@ router.put("/plans/:id", (req, res) => {
             nextAmount
           );
         }
+
+        const updateFeature = db.prepare(`
+          UPDATE subscription_plan_features
+          SET
+            feature_value = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE plan_id = ?
+            AND feature_key = ?
+        `);
+
+        for (const key of requiredFeatureKeys) {
+          const result = updateFeature.run(
+            normalizedFeatures[key],
+            planId,
+            key
+          );
+
+          if (result.changes === 0) {
+            throw new Error(
+              `Missing plan feature configuration: ${key}`
+            );
+          }
+        }
       });
 
     updatePlan();
@@ -1073,6 +1220,9 @@ router.put("/plans/:id", (req, res) => {
           Boolean(price.is_active),
       }));
 
+    const updatedFeatures =
+      planFeatureStatement.all(planId);
+
     return res.json({
       message:
         "Subscription plan updated successfully",
@@ -1081,6 +1231,7 @@ router.put("/plans/:id", (req, res) => {
         is_active:
           Boolean(updatedPlan.is_active),
         prices: updatedPrices,
+        features: updatedFeatures,
       },
     });
   } catch (error) {

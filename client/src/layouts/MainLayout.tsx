@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 
@@ -22,12 +22,28 @@ import {
   X,
   Bell,
   ChevronDown,
+  MapPin,
 } from "lucide-react";
+
+type EntitlementValue = string | number | boolean | null;
+
+type EntitlementResponse = {
+  plan: {
+    id: number;
+    name: string;
+    code: string;
+  };
+  features: Record<string, EntitlementValue>;
+};
 
 function MainLayout() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [entitlements, setEntitlements] =
+    useState<EntitlementResponse | null>(null);
+  const [entitlementsLoading, setEntitlementsLoading] = useState(true);
+
 
   
 
@@ -38,6 +54,83 @@ const user = storedUser
   : null;
 
   const userRole = String(user?.role || "").toLowerCase();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadEntitlements = async () => {
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        if (!cancelled) {
+          setEntitlements(null);
+          setEntitlementsLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/auth/entitlements", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to load subscription entitlements");
+        }
+
+        const data = (await response.json()) as EntitlementResponse;
+
+        if (!cancelled) {
+          setEntitlements(data);
+        }
+      } catch (error) {
+        console.error("Load subscription entitlements error:", error);
+
+        if (!cancelled) {
+          setEntitlements(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setEntitlementsLoading(false);
+        }
+      }
+    };
+
+    loadEntitlements();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasEntitlement = (featureKey: string) => {
+    if (!entitlements) {
+      return false;
+    }
+
+    const value = entitlements.features?.[featureKey];
+
+    if (typeof value === "boolean") {
+      return value;
+    }
+
+    if (typeof value === "number") {
+      return value > 0;
+    }
+
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+
+      return ["included", "true", "yes", "enabled", "1"].includes(
+        normalized
+      );
+    }
+
+    return false;
+  };
+
 
   const initials = user?.name
   ? user.name
@@ -88,6 +181,7 @@ const handleLogout = () => {
       path: "/customers",
       icon: Users,
       roles: ["admin", "manager", "cashier"],
+      entitlement: "customer_expense_tracking",
     },
     {
       name: "Suppliers",
@@ -99,6 +193,13 @@ const handleLogout = () => {
       name: "Expenses",
       path: "/expenses",
       icon: Wallet,
+      roles: ["admin", "manager"],
+      entitlement: "customer_expense_tracking",
+    },
+    {
+      name: "Branches",
+      path: "/branches",
+      icon: MapPin,
       roles: ["admin", "manager"],
     },
   ];
@@ -127,7 +228,13 @@ const handleLogout = () => {
 
   const renderNavigation = (
     title: string,
-    items: typeof mainNavigation
+    items: Array<{
+      name: string;
+      path: string;
+      icon: typeof LayoutDashboard;
+      roles: string[];
+      entitlement?: string;
+    }>
   ) => {
     return (
       <div className="mb-6">
@@ -137,7 +244,21 @@ const handleLogout = () => {
 
         <div className="space-y-1">
           {items
-            .filter((item) => item.roles.includes(userRole))
+            .filter((item) => {
+              if (!item.roles.includes(userRole)) {
+                return false;
+              }
+
+              if (!item.entitlement) {
+                return true;
+              }
+
+              if (entitlementsLoading) {
+                return false;
+              }
+
+              return hasEntitlement(item.entitlement);
+            })
             .map((item) => {
             const Icon = item.icon;
 

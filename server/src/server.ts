@@ -16,13 +16,11 @@ import supplierRoutes from "./routes/supplierRoutes.js";
 import customerRoutes from "./routes/customerRoutes.js";
 import organizationRoutes from "./routes/organizationRoutes.js";
 import superAdminRoutes from "./routes/superAdminRoutes.js";
-
+import branchRoutes from "./routes/branchRoutes.js";
 
 const app = express();
 
-
 app.use(cors());
-
 
 app.use(express.json());
 
@@ -33,17 +31,42 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
-app.use("/api/products",authenticateToken,productRoutes);
-app.use( "/api/categories",authenticateToken,categoryRoutes);
-app.use( "/api/sales", authenticateToken, authorizeRoles("admin", "manager", "cashier"),saleRoutes);
-app.use("/api/dashboard", authenticateToken, authorizeRoles("admin", "manager", "cashier"), dashboardRoutes);
-app.use("/api/reports",authenticateToken,authorizeRoles("admin", "manager"),reportRoutes);
-app.use("/api/expenses",authenticateToken,authorizeRoles("admin", "manager"),expenseRoutes);
+app.use("/api/products", authenticateToken, productRoutes);
+app.use("/api/categories", authenticateToken, categoryRoutes);
+app.use(
+  "/api/sales",
+  authenticateToken,
+  authorizeRoles("admin", "manager", "cashier"),
+  saleRoutes
+);
+app.use(
+  "/api/dashboard",
+  authenticateToken,
+  authorizeRoles("admin", "manager", "cashier"),
+  dashboardRoutes
+);
+app.use(
+  "/api/reports",
+  authenticateToken,
+  authorizeRoles("admin", "manager"),
+  reportRoutes
+);
+app.use(
+  "/api/expenses",
+  authenticateToken,
+  authorizeRoles("admin", "manager"),
+  expenseRoutes
+);
 app.use("/api/suppliers", authenticateToken, supplierRoutes);
 app.use("/api/customers", authenticateToken, customerRoutes);
 app.use("/api/organization", authenticateToken, organizationRoutes);
+app.use(
+  "/api/branches",
+  authenticateToken,
+  authorizeRoles("admin", "manager"),
+  branchRoutes
+);
 app.use("/api/super-admin", superAdminRoutes);
-
 
 const PORT = process.env.PORT || 5000;
 

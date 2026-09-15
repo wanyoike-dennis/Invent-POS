@@ -36,6 +36,15 @@ type PlanPrice = {
   effective_to?: string | null;
 };
 
+type PlanFeature = {
+  id: number;
+  plan_id: number;
+  feature_key: string;
+  feature_label: string;
+  feature_value: string;
+  sort_order: number;
+};
+
 type SubscriptionPlan = {
   id: number;
   code: string;
@@ -44,6 +53,7 @@ type SubscriptionPlan = {
   is_active: boolean;
   sort_order?: number;
   prices?: PlanPrice[];
+  features?: PlanFeature[];
 };
 
 type EditForm = {
@@ -53,6 +63,15 @@ type EditForm = {
   monthly: string;
   quarterly: string;
   annual: string;
+  branchesIncluded: string;
+  usersIncluded: string;
+  salesInventory: boolean;
+  mpesaRecording: boolean;
+  customerExpenseTracking: boolean;
+  staffRoles: "Basic" | "Advanced";
+  multiBranchReports: boolean;
+  auditAnalytics: boolean;
+  support: "Standard" | "Priority" | "Dedicated";
 };
 
 const cycleLabels: Record<BillingCycle, string> = {
@@ -90,6 +109,27 @@ function priceFor(
   );
 }
 
+function featureFor(
+  plan: SubscriptionPlan,
+  key: string
+) {
+  return (
+    (plan.features || []).find(
+      (feature) =>
+        feature.feature_key === key
+    )?.feature_value || ""
+  );
+}
+
+function featureEnabled(
+  plan: SubscriptionPlan,
+  key: string
+) {
+  return (
+    featureFor(plan, key) === "included"
+  );
+}
+
 function SuperAdminPlans() {
   const navigate = useNavigate();
 
@@ -119,6 +159,15 @@ function SuperAdminPlans() {
       monthly: "",
       quarterly: "",
       annual: "",
+      branchesIncluded: "1",
+      usersIncluded: "1",
+      salesInventory: true,
+      mpesaRecording: true,
+      customerExpenseTracking: false,
+      staffRoles: "Basic",
+      multiBranchReports: false,
+      auditAnalytics: false,
+      support: "Standard",
     });
 
   const logout = useCallback(() => {
@@ -209,6 +258,45 @@ function SuperAdminPlans() {
     [plans]
   );
 
+  const featureRows = useMemo(() => {
+    const rows = new Map<string, { label: string; sort_order: number }>();
+
+    plans.forEach((plan) => {
+      (plan.features || []).forEach((feature) => {
+        if (!rows.has(feature.feature_key)) {
+          rows.set(feature.feature_key, {
+            label: feature.feature_label,
+            sort_order: feature.sort_order,
+          });
+        }
+      });
+    });
+
+    return Array.from(rows.entries())
+      .map(([key, value]) => ({ key, ...value }))
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [plans]);
+
+  const featureValue = (plan: SubscriptionPlan, key: string) =>
+    (plan.features || []).find((feature) => feature.feature_key === key)
+      ?.feature_value || "—";
+
+  const renderFeatureValue = (value: string) => {
+    if (value === "included") {
+      return (
+        <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700">
+          <CheckCircle2 size={16} /> Included
+        </span>
+      );
+    }
+
+    if (value === "not_included") {
+      return <span className="font-semibold text-slate-400">—</span>;
+    }
+
+    return <span className="font-semibold text-[#0B1F33]">{value}</span>;
+  };
+
   const openEdit = (
     plan: SubscriptionPlan
   ) => {
@@ -240,6 +328,60 @@ function SuperAdminPlans() {
           "annual"
         )?.amount ?? ""
       ),
+      branchesIncluded:
+        featureFor(
+          plan,
+          "branches_included"
+        ) || "1",
+      usersIncluded:
+        featureFor(
+          plan,
+          "users_included"
+        ) || "1",
+      salesInventory:
+        featureEnabled(
+          plan,
+          "sales_inventory"
+        ),
+      mpesaRecording:
+        featureEnabled(
+          plan,
+          "mpesa_recording"
+        ),
+      customerExpenseTracking:
+        featureEnabled(
+          plan,
+          "customer_expense_tracking"
+        ),
+      staffRoles:
+        featureFor(
+          plan,
+          "staff_roles"
+        ) === "Advanced"
+          ? "Advanced"
+          : "Basic",
+      multiBranchReports:
+        featureEnabled(
+          plan,
+          "multi_branch_reports"
+        ),
+      auditAnalytics:
+        featureEnabled(
+          plan,
+          "audit_analytics"
+        ),
+      support:
+        featureFor(
+          plan,
+          "support"
+        ) === "Dedicated"
+          ? "Dedicated"
+          : featureFor(
+              plan,
+              "support"
+            ) === "Priority"
+          ? "Priority"
+          : "Standard",
     });
   };
 
@@ -282,6 +424,33 @@ function SuperAdminPlans() {
       return;
     }
 
+    const branchesIncluded = Number(
+      editForm.branchesIncluded
+    );
+    const usersIncluded = Number(
+      editForm.usersIncluded
+    );
+
+    if (
+      !Number.isInteger(branchesIncluded) ||
+      branchesIncluded < 1
+    ) {
+      setError(
+        "Branches included must be a whole number greater than 0."
+      );
+      return;
+    }
+
+    if (
+      !Number.isInteger(usersIncluded) ||
+      usersIncluded < 1
+    ) {
+      setError(
+        "Users included must be a whole number greater than 0."
+      );
+      return;
+    }
+
     try {
       setSaving(true);
       setError("");
@@ -303,6 +472,36 @@ function SuperAdminPlans() {
                 monthly,
                 quarterly,
                 annual,
+              },
+              features: {
+                branches_included:
+                  String(branchesIncluded),
+                users_included:
+                  String(usersIncluded),
+                sales_inventory:
+                  editForm.salesInventory
+                    ? "included"
+                    : "not_included",
+                mpesa_recording:
+                  editForm.mpesaRecording
+                    ? "included"
+                    : "not_included",
+                customer_expense_tracking:
+                  editForm.customerExpenseTracking
+                    ? "included"
+                    : "not_included",
+                staff_roles:
+                  editForm.staffRoles,
+                multi_branch_reports:
+                  editForm.multiBranchReports
+                    ? "included"
+                    : "not_included",
+                audit_analytics:
+                  editForm.auditAnalytics
+                    ? "included"
+                    : "not_included",
+                support:
+                  editForm.support,
               },
             }),
           }
@@ -633,6 +832,57 @@ function SuperAdminPlans() {
             ))}
           </section>
         )}
+
+        {!loading && plans.length > 0 && featureRows.length > 0 && (
+          <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_6px_22px_rgba(15,23,42,0.05)]">
+            <div className="border-b border-slate-100 px-5 py-5">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">
+                Plan Entitlements
+              </p>
+              <h2 className="mt-1 text-xl font-bold text-[#0B1F33]">
+                Features & Limits
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Current database-backed entitlements for Starter, Business and Pro.
+                Edit a plan to change its features and limits. POS enforcement will be added separately.
+              </p>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-[760px] w-full border-collapse">
+                <thead>
+                  <tr className="bg-slate-50">
+                    <th className="border-b border-slate-200 px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+                      Feature / Limit
+                    </th>
+                    {plans.map((plan) => (
+                      <th
+                        key={plan.id}
+                        className="border-b border-slate-200 px-5 py-3 text-left text-xs font-bold uppercase tracking-[0.12em] text-slate-500"
+                      >
+                        {plan.name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {featureRows.map((row) => (
+                    <tr key={row.key} className="border-b border-slate-100 last:border-b-0">
+                      <td className="px-5 py-4 text-sm font-semibold text-slate-700">
+                        {row.label}
+                      </td>
+                      {plans.map((plan) => (
+                        <td key={`${plan.id}-${row.key}`} className="px-5 py-4 text-sm">
+                          {renderFeatureValue(featureValue(plan, row.key))}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </main>
 
       {editingPlan && (
@@ -647,9 +897,8 @@ function SuperAdminPlans() {
                   {editingPlan.name}
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  Update plan details and
-                  official future billing
-                  prices.
+                  Update plan details, official
+                  prices, features and limits.
                 </p>
               </div>
 
@@ -783,6 +1032,130 @@ function SuperAdminPlans() {
                       </div>
                     )
                   )}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 pt-5">
+                <p className="text-sm font-bold text-[#0B1F33]">
+                  Features & Limits
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  These values are stored in the plan entitlement database and
+                  will become the source of truth when POS enforcement is enabled.
+                </p>
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Branches Included
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={editForm.branchesIncluded}
+                      onChange={(e) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          branchesIncluded: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Users Included
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={editForm.usersIncluded}
+                      onChange={(e) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          usersIncluded: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Staff Roles & Permissions
+                    </label>
+                    <select
+                      value={editForm.staffRoles}
+                      onChange={(e) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          staffRoles: e.target.value as "Basic" | "Advanced",
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="Basic">Basic</option>
+                      <option value="Advanced">Advanced</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Support Level
+                    </label>
+                    <select
+                      value={editForm.support}
+                      onChange={(e) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          support: e.target.value as
+                            | "Standard"
+                            | "Priority"
+                            | "Dedicated",
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="Standard">Standard</option>
+                      <option value="Priority">Priority</option>
+                      <option value="Dedicated">Dedicated</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {[
+                    ["salesInventory", "Sales, receipts & inventory"],
+                    ["mpesaRecording", "M-Pesa payment recording"],
+                    ["customerExpenseTracking", "Customer & expense tracking"],
+                    ["multiBranchReports", "Multi-branch reports"],
+                    ["auditAnalytics", "Audit logs & advanced analytics"],
+                  ].map(([field, label]) => (
+                    <label
+                      key={field}
+                      className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(
+                          editForm[field as keyof EditForm]
+                        )}
+                        onChange={(e) =>
+                          setEditForm((current) => ({
+                            ...current,
+                            [field]: e.target.checked,
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                      <span className="text-sm font-semibold text-slate-700">
+                        {label}
+                      </span>
+                    </label>
+                  ))}
                 </div>
               </div>
 
