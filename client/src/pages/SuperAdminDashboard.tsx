@@ -7,10 +7,12 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
-  LogOut,
   CreditCard,
   FileText,
-  Smartphone,
+  Headphones,
+  LayoutDashboard,
+  LogOut,
+  Menu,
   PackageCheck,
   Plus,
   RefreshCw,
@@ -18,6 +20,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
   Users,
   X,
   XCircle,
@@ -104,6 +107,7 @@ type SubscriptionPayment = {
 
 function SuperAdminDashboard() {
   const navigate = useNavigate();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const [summary, setSummary] = useState<Summary>({});
   const [organizations, setOrganizations] =
@@ -663,543 +667,611 @@ function SuperAdminDashboard() {
             organization.status ===
               statusFilter;
 
-          return (
-            matchesSearch &&
-            matchesStatus
-          );
+          return matchesSearch && matchesStatus;
         }
       );
-    }, [
-      organizations,
-      searchTerm,
-      statusFilter,
-    ]);
+    }, [organizations, searchTerm, statusFilter]);
 
-  const totalOrganizations =
-    summary.organizations?.total ?? 0;
-  const totalUsers =
-    summary.users?.total ?? 0;
-  const activeUsers =
-    summary.users?.active ?? 0;
+  const totalOrganizations = summary.organizations?.total ?? organizations.length;
+  const activeOrganizations = summary.organizations?.active ?? 0;
+  const totalUsers = summary.users?.total ?? 0;
+  const activeUsers = summary.users?.active ?? 0;
+  const activityRate = totalOrganizations > 0
+    ? Math.round((activeOrganizations / totalOrganizations) * 100)
+    : 0;
 
-  const activeOrganizations =
-    summary.organizations?.active ?? 0;
-
-  const activityRate =
-    totalOrganizations > 0
-      ? Math.round(
-          (activeOrganizations /
-            totalOrganizations) *
-            100
-        )
-      : 0;
-
-  const cards = [
+  const navItems = [
+    {
+      label: "Overview",
+      icon: LayoutDashboard,
+      path: "/super-admin/dashboard",
+      active: true,
+    },
     {
       label: "Organizations",
-      value: totalOrganizations,
-      helper:
-        "Registered businesses",
       icon: Building2,
-      iconClass:
-        "bg-blue-50 text-blue-600",
+      path: "/super-admin/dashboard#organizations",
     },
     {
-      label: "Active",
-      value:
-        summary.organizations?.active ??
-        0,
-      helper: `${activityRate}% of all organizations`,
-      icon: CheckCircle2,
-      iconClass:
-        "bg-emerald-50 text-emerald-600",
+      label: "Billing & Revenue",
+      icon: BarChart3,
+      path: "/super-admin/billing",
     },
     {
-      label: "Trials",
-      value:
-        summary.organizations?.trial ??
-        0,
-      helper:
-        "Organizations evaluating Invent POS",
-      icon: Clock3,
-      iconClass:
-        "bg-indigo-50 text-indigo-600",
+      label: "Plans",
+      icon: PackageCheck,
+      path: "/super-admin/plans",
     },
     {
-      label: "Suspended",
-      value:
-        summary.organizations
-          ?.suspended ?? 0,
-      helper:
-        "Access currently blocked",
-      icon: ShieldAlert,
-      iconClass:
-        "bg-amber-50 text-amber-600",
-    },
-    {
-      label: "Expired",
-      value:
-        summary.organizations?.expired ??
-        0,
-      helper:
-        "Subscription renewal required",
-      icon: XCircle,
-      iconClass:
-        "bg-rose-50 text-rose-600",
-    },
-    {
-      label: "Active Users",
-      value: activeUsers,
-      helper: `${totalUsers} total platform users`,
-      icon: Users,
-      iconClass:
-        "bg-violet-50 text-violet-600",
+      label: "Support Center",
+      icon: Headphones,
+      path: "/super-admin/support",
     },
   ];
 
+  const navigateFromSidebar = (path: string) => {
+    setMobileNavOpen(false);
+
+    if (path === "/super-admin/dashboard#organizations") {
+      const section = document.getElementById("organizations");
+      section?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    navigate(path);
+  };
+
   return (
-    <div className="min-h-screen bg-[#F5F7FB]">
-      {/* TOP BAR */}
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-5 py-4 lg:px-8">
-          <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0B1F33] text-white shadow-sm">
-              <ShieldCheck size={23} />
-            </div>
+    <div className="min-h-screen bg-[#F4F7FB] text-slate-900">
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[2px] lg:hidden"
+        />
+      )}
 
-            <div>
-              <p className="text-base font-bold text-[#0B1F33]">
-                Invent POS
-              </p>
-              <p className="text-xs font-medium text-slate-500">
-                Platform Administration
-              </p>
-            </div>
-          </div>
-
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-[272px] flex-col bg-[#081B2C] text-white shadow-2xl transition-transform duration-300 lg:translate-x-0 ${
+          mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex h-[84px] items-center justify-between border-b border-white/10 px-6">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() =>
-                loadData(true)
-              }
-              disabled={refreshing}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw
-                size={16}
-                className={
-                  refreshing
-                    ? "animate-spin"
-                    : ""
-                }
-              />
-              <span className="hidden sm:inline">
-                Refresh
-              </span>
-            </button>
-
-            <div className="hidden h-8 w-px bg-slate-200 sm:block" />
-
-            <button
-              onClick={logout}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0B1F33] px-4 text-sm font-semibold text-white transition hover:bg-[#102A45]"
-            >
-              <LogOut size={16} />
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-[1600px] px-5 py-7 lg:px-8 lg:py-9">
-        {/* PAGE INTRO */}
-        <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="mb-1 text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
-              Platform Overview
-            </p>
-            <h1 className="text-3xl font-bold tracking-tight text-[#0B1F33] lg:text-[34px]">
-              Super Admin Dashboard
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              Monitor organizations,
-              user access and subscription
-              status across the Invent POS
-              platform.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
-              <Activity
-                size={17}
-                className="text-emerald-500"
-              />
-              Platform operational
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-950/30">
+              <ShieldCheck size={22} />
             </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/super-admin/billing")
-              }
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100"
-            >
-              <BarChart3 size={17} />
-              Billing & Revenue
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/super-admin/plans")
-              }
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-100"
-            >
-              <PackageCheck size={17} />
-              Plans
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setError("");
-                resetOnboardForm();
-                setShowOnboard(true);
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              <Plus size={17} />
-              Onboard Organization
-            </button>
+            <div>
+              <p className="text-[17px] font-bold tracking-tight">Invent POS</p>
+              <p className="mt-0.5 text-xs font-medium text-slate-400">
+                Platform Admin
+              </p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            className="rounded-xl p-2 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden"
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        {error && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
-            {error}
-          </div>
-        )}
+        <div className="px-4 py-6">
+          <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+            Platform
+          </p>
 
-        {/* KPI CARDS */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {cards.map(
-            ({
-              label,
-              value,
-              helper,
-              icon: Icon,
-              iconClass,
-            }) => (
-              <div
+          <nav className="space-y-1.5">
+            {navItems.map(({ label, icon: Icon, path, active }) => (
+              <button
                 key={label}
-                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(15,23,42,0.04)]"
+                type="button"
+                onClick={() => navigateFromSidebar(path)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${
+                  active
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-950/20"
+                    : "text-slate-300 hover:bg-white/[0.07] hover:text-white"
+                }`}
               >
-                <div
-                  className={`mb-5 flex h-10 w-10 items-center justify-center rounded-xl ${iconClass}`}
-                >
-                  <Icon size={20} />
-                </div>
-
-                <p className="text-sm font-medium text-slate-500">
-                  {label}
-                </p>
-                <p className="mt-1 text-3xl font-bold tracking-tight text-[#0B1F33]">
-                  {value}
-                </p>
-                <p className="mt-2 min-h-[34px] text-xs leading-5 text-slate-400">
-                  {helper}
-                </p>
-              </div>
-            )
-          )}
+                <Icon size={18} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
         </div>
 
-        {/* ORGANIZATIONS */}
-        <section className="mt-7 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_6px_22px_rgba(15,23,42,0.05)]">
-          <div className="border-b border-slate-200 px-5 py-5 lg:px-6">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="mx-4 mt-auto mb-4 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+          <div className="flex items-center gap-2.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            </span>
+            <p className="text-sm font-semibold text-slate-200">
+              Platform operational
+            </p>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Core administration services are available.
+          </p>
+        </div>
+
+        <div className="border-t border-white/10 p-4">
+          <button
+            type="button"
+            onClick={logout}
+            className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-sm font-semibold text-slate-300 transition hover:bg-rose-500/10 hover:text-rose-300"
+          >
+            <LogOut size={18} />
+            Logout
+          </button>
+        </div>
+      </aside>
+
+      <div className="min-h-screen lg:pl-[272px]">
+        <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
+          <div className="flex h-[72px] items-center justify-between px-5 lg:px-8 xl:px-10">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 lg:hidden"
+              >
+                <Menu size={19} />
+              </button>
               <div>
-                <h2 className="text-lg font-bold text-[#0B1F33]">
-                  Organizations
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Manage organization
-                  access without exposing
-                  tenant business records.
+                <p className="text-sm font-bold text-[#0B1F33]">
+                  Overview
+                </p>
+                <p className="hidden text-xs text-slate-400 sm:block">
+                  Invent POS platform administration
                 </p>
               </div>
+            </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <div className="relative min-w-[280px]">
-                  <Search
-                    size={17}
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-                  <input
-                    value={searchTerm}
-                    onChange={(e) =>
-                      setSearchTerm(
-                        e.target.value
-                      )
-                    }
-                    placeholder="Search organization..."
-                    className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  />
-                </div>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => loadData(true)}
+                disabled={refreshing}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                <RefreshCw
+                  size={16}
+                  className={refreshing ? "animate-spin" : ""}
+                />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
 
-                <div className="relative">
-                  <SlidersHorizontal
-                    size={16}
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-                  <select
-                    value={statusFilter}
-                    onChange={(e) =>
-                      setStatusFilter(
-                        e.target.value as
-                          | "all"
-                          | OrganizationStatus
-                      )
-                    }
-                    className="min-w-[170px] appearance-none rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-8 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="all">
-                      All statuses
-                    </option>
-                    <option value="active">
-                      Active
-                    </option>
-                    <option value="trial">
-                      Trial
-                    </option>
-                    <option value="suspended">
-                      Suspended
-                    </option>
-                    <option value="expired">
-                      Expired
-                    </option>
-                  </select>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setError("");
+                  resetOnboardForm();
+                  setShowOnboard(true);
+                }}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              >
+                <Plus size={16} />
+                <span className="hidden sm:inline">Onboard Organization</span>
+                <span className="sm:hidden">Onboard</span>
+              </button>
             </div>
           </div>
+        </header>
 
-          {loading ? (
-            <div className="flex min-h-[320px] items-center justify-center">
-              <div className="text-center">
-                <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
-                <p className="mt-4 text-sm text-slate-500">
-                  Loading organizations...
+        <main className="px-5 py-7 lg:px-8 lg:py-8 xl:px-10">
+          <div className="mx-auto max-w-[1500px]">
+            <div className="mb-7">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-blue-600" />
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
+                  Platform Overview
                 </p>
               </div>
+              <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#0B1F33] lg:text-[34px]">
+                Super Admin Dashboard
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+                Monitor organizations, user access and subscription status
+                across the Invent POS platform.
+              </p>
             </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1100px] text-left">
-                  <thead>
-                    <tr className="bg-[#F8FAFC] text-xs font-bold uppercase tracking-[0.08em] text-slate-400">
-                      <th className="px-6 py-4">
-                        Organization
-                      </th>
-                      <th className="px-6 py-4">
-                        Status
-                      </th>
-                      <th className="px-6 py-4">
-                        Users
-                      </th>
-                      <th className="px-6 py-4">
-                        Trial
-                      </th>
-                      <th className="px-6 py-4">
-                        Subscription
-                      </th>
-                      <th className="px-6 py-4 text-right">
-                        Action
-                      </th>
-                    </tr>
-                  </thead>
 
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredOrganizations.map(
-                      (organization) => (
-                        <tr
-                          key={organization.id}
-                          className="transition hover:bg-slate-50/70"
-                        >
-                          <td className="px-6 py-5">
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-sm font-bold text-slate-600">
-                                {organization.name
-                                  .split(/\s+/)
-                                  .filter(Boolean)
-                                  .slice(0, 2)
-                                  .map((word) =>
-                                    word
-                                      .charAt(0)
-                                      .toUpperCase()
-                                  )
-                                  .join("") ||
-                                  "OR"}
-                              </div>
-
-                              <div>
-                                <p className="font-semibold text-[#0B1F33]">
-                                  {
-                                    organization.name
-                                  }
-                                </p>
-                                <p className="mt-0.5 text-xs text-slate-500">
-                                  {organization.email ||
-                                    organization.slug}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="px-6 py-5">
-                            <span
-                              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold capitalize ${
-                                statusStyles[
-                                  organization
-                                    .status
-                                ]
-                              }`}
-                            >
-                              <span
-                                className={`h-1.5 w-1.5 rounded-full ${
-                                  statusDotStyles[
-                                    organization
-                                      .status
-                                  ]
-                                }`}
-                              />
-                              {
-                                organization.status
-                              }
-                            </span>
-                          </td>
-
-                          <td className="px-6 py-5">
-                            <p className="text-sm font-semibold text-slate-700">
-                              {organization.active_user_count ??
-                                0}{" "}
-                              active
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-400">
-                              {organization.user_count ??
-                                0}{" "}
-                              total users
-                            </p>
-                          </td>
-
-                          <td className="px-6 py-5">
-                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                              <CalendarDays
-                                size={15}
-                                className="text-slate-400"
-                              />
-                              {formatDate(
-                                organization.trial_ends_at
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="px-6 py-5">
-                            <div className="flex items-center gap-2 text-sm text-slate-600">
-                              <CalendarDays
-                                size={15}
-                                className="text-slate-400"
-                              />
-                              {formatDate(
-                                organization.subscription_expires_at
-                              )}
-                            </div>
-                          </td>
-
-                          <td className="px-6 py-5 text-right">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() =>
-                                  openBilling(
-                                    organization
-                                  )
-                                }
-                                className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
-                              >
-                                <CreditCard size={16} />
-                                Billing
-                              </button>
-
-                              <button
-                                onClick={() =>
-                                  navigate(
-                                    `/super-admin/organizations/${organization.id}`
-                                  )
-                                }
-                                className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-                              >
-                                Details
-                                <ChevronRight
-                                  size={16}
-                                />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    )}
-
-                    {filteredOrganizations.length ===
-                      0 && (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          className="px-6 py-16 text-center"
-                        >
-                          <Building2
-                            size={32}
-                            className="mx-auto text-slate-300"
-                          />
-                          <p className="mt-3 font-semibold text-slate-700">
-                            No organizations
-                            found
-                          </p>
-                          <p className="mt-1 text-sm text-slate-400">
-                            Try another search
-                            or status filter.
-                          </p>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+            {error && (
+              <div className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+                <span>{error}</span>
+                <button type="button" onClick={() => setError("")}>
+                  <X size={17} />
+                </button>
               </div>
+            )}
 
-              <div className="flex items-center justify-between border-t border-slate-200 bg-[#FBFCFE] px-6 py-4">
-                <p className="text-sm text-slate-500">
-                  Showing{" "}
-                  <span className="font-semibold text-slate-700">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                {
+                  label: "Organizations",
+                  value: totalOrganizations,
+                  helper: "Registered businesses",
+                  icon: Building2,
+                  iconClass: "bg-blue-50 text-blue-600",
+                },
+                {
+                  label: "Active Organizations",
+                  value: activeOrganizations,
+                  helper: `${activityRate}% of all organizations`,
+                  icon: CheckCircle2,
+                  iconClass: "bg-emerald-50 text-emerald-600",
+                },
+                {
+                  label: "Active Users",
+                  value: activeUsers,
+                  helper: `${totalUsers} total platform users`,
+                  icon: Users,
+                  iconClass: "bg-violet-50 text-violet-600",
+                },
+                {
+                  label: "Requires Attention",
+                  value:
+                    (summary.organizations?.suspended ?? 0) +
+                    (summary.organizations?.expired ?? 0),
+                  helper: "Suspended or expired accounts",
+                  icon: ShieldAlert,
+                  iconClass: "bg-amber-50 text-amber-600",
+                },
+              ].map(({ label, value, helper, icon: Icon, iconClass }) => (
+                <div
+                  key={label}
+                  className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[0_3px_16px_rgba(15,23,42,0.035)]"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-500">
+                        {label}
+                      </p>
+                      <p className="mt-2 text-[30px] font-bold tracking-tight text-[#0B1F33]">
+                        {value}
+                      </p>
+                    </div>
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${iconClass}`}>
+                      <Icon size={19} />
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs font-medium text-slate-400">
+                    {helper}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_1fr]">
+              <section className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[0_3px_16px_rgba(15,23,42,0.035)]">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-bold text-[#0B1F33]">
+                      Subscription Health
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Current organization access status
+                    </p>
+                  </div>
+                  <Activity size={19} className="text-slate-300" />
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
                     {
-                      filteredOrganizations.length
-                    }
-                  </span>{" "}
-                  of{" "}
-                  <span className="font-semibold text-slate-700">
-                    {organizations.length}
-                  </span>{" "}
-                  organizations
-                </p>
+                      label: "Active",
+                      value: summary.organizations?.active ?? 0,
+                      icon: CheckCircle2,
+                      className: "text-emerald-600 bg-emerald-50",
+                    },
+                    {
+                      label: "Trials",
+                      value: summary.organizations?.trial ?? 0,
+                      icon: Clock3,
+                      className: "text-blue-600 bg-blue-50",
+                    },
+                    {
+                      label: "Suspended",
+                      value: summary.organizations?.suspended ?? 0,
+                      icon: ShieldAlert,
+                      className: "text-amber-600 bg-amber-50",
+                    },
+                    {
+                      label: "Expired",
+                      value: summary.organizations?.expired ?? 0,
+                      icon: XCircle,
+                      className: "text-rose-600 bg-rose-50",
+                    },
+                  ].map(({ label, value, icon: Icon, className }) => (
+                    <div key={label} className="rounded-xl bg-slate-50/80 p-3.5">
+                      <div className={`mb-3 flex h-8 w-8 items-center justify-center rounded-lg ${className}`}>
+                        <Icon size={16} />
+                      </div>
+                      <p className="text-xl font-bold text-[#0B1F33]">{value}</p>
+                      <p className="mt-0.5 text-xs font-medium text-slate-500">
+                        {label}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
 
-                <p className="text-xs text-slate-400">
-                  Tenant data remains isolated
-                </p>
+              <section className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[0_3px_16px_rgba(15,23,42,0.035)]">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-bold text-[#0B1F33]">
+                      Needs Attention
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Platform access items to review
+                    </p>
+                  </div>
+                  <ShieldAlert size={19} className="text-amber-500" />
+                </div>
+
+                <div className="mt-4 space-y-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter("expired")}
+                    className="flex w-full items-center justify-between rounded-xl bg-rose-50/70 px-4 py-3 text-left transition hover:bg-rose-50"
+                  >
+                    <span className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+                      <XCircle size={17} className="text-rose-500" />
+                      Expired subscriptions
+                    </span>
+                    <span className="rounded-lg bg-white px-2.5 py-1 text-xs font-bold text-rose-600 shadow-sm">
+                      {summary.organizations?.expired ?? 0}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter("suspended")}
+                    className="flex w-full items-center justify-between rounded-xl bg-amber-50/70 px-4 py-3 text-left transition hover:bg-amber-50"
+                  >
+                    <span className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+                      <ShieldAlert size={17} className="text-amber-500" />
+                      Suspended organizations
+                    </span>
+                    <span className="rounded-lg bg-white px-2.5 py-1 text-xs font-bold text-amber-600 shadow-sm">
+                      {summary.organizations?.suspended ?? 0}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate("/super-admin/support")}
+                    className="flex w-full items-center justify-between rounded-xl bg-blue-50/70 px-4 py-3 text-left transition hover:bg-blue-50"
+                  >
+                    <span className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+                      <Headphones size={17} className="text-blue-600" />
+                      Review customer support
+                    </span>
+                    <ChevronRight size={16} className="text-blue-500" />
+                  </button>
+                </div>
+              </section>
+            </div>
+
+            <section
+              id="organizations"
+              className="mt-5 scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_3px_16px_rgba(15,23,42,0.035)]"
+            >
+              <div className="border-b border-slate-200 px-5 py-5 lg:px-6">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold text-[#0B1F33]">
+                      Organizations
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Manage organization access without exposing tenant
+                      business records.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <div className="relative min-w-[260px]">
+                      <Search
+                        size={17}
+                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                      <input
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Search organization..."
+                        className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      />
+                    </div>
+
+                    <div className="relative">
+                      <SlidersHorizontal
+                        size={16}
+                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                      <select
+                        value={statusFilter}
+                        onChange={(e) =>
+                          setStatusFilter(
+                            e.target.value as "all" | OrganizationStatus
+                          )
+                        }
+                        className="min-w-[165px] appearance-none rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-8 text-sm font-medium text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="all">All statuses</option>
+                        <option value="active">Active</option>
+                        <option value="trial">Trial</option>
+                        <option value="suspended">Suspended</option>
+                        <option value="expired">Expired</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </>
-          )}
-        </section>
-      </main>
+
+              {loading ? (
+                <div className="flex min-h-[300px] items-center justify-center">
+                  <div className="text-center">
+                    <div className="mx-auto h-9 w-9 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+                    <p className="mt-4 text-sm text-slate-500">
+                      Loading organizations...
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[1040px] text-left">
+                      <thead>
+                        <tr className="bg-[#F8FAFC] text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
+                          <th className="px-6 py-3.5">Organization</th>
+                          <th className="px-6 py-3.5">Status</th>
+                          <th className="px-6 py-3.5">Plan</th>
+                          <th className="px-6 py-3.5">Users</th>
+                          <th className="px-6 py-3.5">Subscription</th>
+                          <th className="px-6 py-3.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredOrganizations.map((organization) => (
+                          <tr
+                            key={organization.id}
+                            className="transition hover:bg-slate-50/70"
+                          >
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xs font-bold text-slate-600">
+                                  {organization.name
+                                    .split(/\s+/)
+                                    .filter(Boolean)
+                                    .slice(0, 2)
+                                    .map((word) => word.charAt(0).toUpperCase())
+                                    .join("") || "OR"}
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-[#0B1F33]">
+                                    {organization.name}
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-slate-400">
+                                    {organization.email || organization.slug}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="px-6 py-4">
+                              <span
+                                className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold capitalize ${
+                                  statusStyles[organization.status]
+                                }`}
+                              >
+                                <span
+                                  className={`h-1.5 w-1.5 rounded-full ${
+                                    statusDotStyles[organization.status]
+                                  }`}
+                                />
+                                {organization.status}
+                              </span>
+                            </td>
+
+                            <td className="px-6 py-4">
+                              <p className="text-sm font-semibold capitalize text-slate-700">
+                                {organization.subscription_plan || "—"}
+                              </p>
+                              <p className="mt-0.5 text-xs capitalize text-slate-400">
+                                {organization.billing_cycle || "No billing cycle"}
+                              </p>
+                            </td>
+
+                            <td className="px-6 py-4">
+                              <p className="text-sm font-semibold text-slate-700">
+                                {organization.active_user_count ?? 0} active
+                              </p>
+                              <p className="mt-0.5 text-xs text-slate-400">
+                                {organization.user_count ?? 0} total
+                              </p>
+                            </td>
+
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2 text-sm text-slate-600">
+                                <CalendarDays size={14} className="text-slate-400" />
+                                {formatDate(organization.subscription_expires_at)}
+                              </div>
+                            </td>
+
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openBilling(organization)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                                >
+                                  <CreditCard size={14} />
+                                  Billing
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    navigate(
+                                      `/super-admin/organizations/${organization.id}`
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0B1F33] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#102A45]"
+                                >
+                                  View
+                                  <ChevronRight size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+
+                        {filteredOrganizations.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-14 text-center">
+                              <Building2
+                                size={30}
+                                className="mx-auto text-slate-300"
+                              />
+                              <p className="mt-3 font-semibold text-slate-700">
+                                No organizations found
+                              </p>
+                              <p className="mt-1 text-sm text-slate-400">
+                                Try another search or status filter.
+                              </p>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex flex-col gap-2 border-t border-slate-200 bg-[#FBFCFE] px-6 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-slate-500">
+                      Showing{" "}
+                      <span className="font-semibold text-slate-700">
+                        {filteredOrganizations.length}
+                      </span>{" "}
+                      of{" "}
+                      <span className="font-semibold text-slate-700">
+                        {organizations.length}
+                      </span>{" "}
+                      organizations
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Tenant business data remains isolated
+                    </p>
+                  </div>
+                </>
+              )}
+            </section>
+          </div>
+        </main>
+      </div>
 
       {/* ONBOARD ORGANIZATION MODAL */}
       {showOnboard && (

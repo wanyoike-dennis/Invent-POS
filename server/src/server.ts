@@ -19,6 +19,7 @@ import superAdminRoutes from "./routes/superAdminRoutes.js";
 import branchRoutes from "./routes/branchRoutes.js";
 import stockTransferRoutes from "./routes/stockTransferRoutes.js";
 import auditRoutes from "./routes/auditRoutes.js";
+import supportRoutes from "./routes/supportRoutes.js";
 
 const app = express();
 
@@ -79,6 +80,13 @@ app.use(
   authenticateToken,
   authorizeRoles("admin", "manager"),
   auditRoutes
+);
+
+app.use(
+  "/api/support",
+  authenticateToken,
+  authorizeRoles("admin", "manager", "cashier"),
+  supportRoutes
 );
 
 app.use("/api/super-admin", superAdminRoutes);

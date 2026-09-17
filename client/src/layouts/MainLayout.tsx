@@ -17,6 +17,7 @@ import {
   Wallet,
   BarChart3,
   ShieldCheck,
+  Headphones,
   Settings,
   LogOut,
   Menu,
@@ -222,6 +223,12 @@ const handleLogout = () => {
   ];
 
   const systemNavigation = [
+    {
+      name: "Support",
+      path: "/support",
+      icon: Headphones,
+      roles: ["admin", "manager", "cashier"],
+    },
     {
       name: "Settings",
       path: "/settings",

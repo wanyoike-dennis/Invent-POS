@@ -2254,4 +2254,632 @@ router.put(
   }
 );
 
+
+// ============================================================
+// SUPER ADMIN SUPPORT CENTER
+// Platform-wide support management. This intentionally exposes
+// support-ticket data only, not tenant POS sales/customer/inventory data.
+// ============================================================
+
+const normalizeSupportStatus = (value: unknown) =>
+  String(value ?? "").trim().toLowerCase();
+
+const normalizeSupportPriority = (value: unknown) =>
+  String(value ?? "").trim().toLowerCase();
+
+const serializeSuperAdminSupportTicket = (row: any) => ({
+  id: row.id,
+  organizationId: row.organization_id,
+  ticketNumber: row.ticket_number,
+  subject: row.subject,
+  description: row.description,
+  category: row.category,
+  priority: row.priority,
+  status: row.status,
+  supportLevel: row.support_level,
+  assignedTo: row.assigned_to,
+  resolvedAt: row.resolved_at,
+  closedAt: row.closed_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  organization: {
+    id: row.organization_id,
+    name: row.organization_name,
+    slug: row.organization_slug,
+    status: row.organization_status,
+    subscriptionPlan: row.subscription_plan,
+  },
+  branch: row.branch_id
+    ? {
+        id: row.branch_id,
+        name: row.branch_name,
+        code: row.branch_code,
+      }
+    : null,
+  createdBy: row.created_by
+    ? {
+        id: row.created_by,
+        name: row.created_by_name,
+        email: row.created_by_email,
+        role: row.created_by_role,
+      }
+    : null,
+});
+
+const superAdminSupportTicketSelect = `
+  SELECT
+    st.*,
+    o.name AS organization_name,
+    o.slug AS organization_slug,
+    o.status AS organization_status,
+    o.subscription_plan,
+    b.name AS branch_name,
+    b.code AS branch_code,
+    u.name AS created_by_name,
+    u.email AS created_by_email,
+    u.role AS created_by_role
+  FROM support_tickets st
+  INNER JOIN organizations o
+    ON o.id = st.organization_id
+  LEFT JOIN branches b
+    ON b.id = st.branch_id
+   AND b.organization_id = st.organization_id
+  LEFT JOIN users u
+    ON u.id = st.created_by
+   AND u.organization_id = st.organization_id
+`;
+
+router.get("/support/overview", (_req, res) => {
+  try {
+    const counts = db
+      .prepare(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
+          SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+          SUM(CASE WHEN status = 'waiting_customer' THEN 1 ELSE 0 END) AS waiting_customer,
+          SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) AS resolved,
+          SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) AS closed,
+          SUM(CASE WHEN priority = 'urgent' AND status NOT IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS urgent,
+          SUM(CASE WHEN support_level = 'Dedicated' AND status NOT IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS dedicated_open,
+          SUM(CASE WHEN support_level = 'Priority' AND status NOT IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS priority_open,
+          SUM(CASE WHEN support_level = 'Standard' AND status NOT IN ('resolved', 'closed') THEN 1 ELSE 0 END) AS standard_open
+        FROM support_tickets
+      `)
+      .get() as any;
+
+    return res.json({
+      counts: {
+        total: Number(counts?.total || 0),
+        open: Number(counts?.open || 0),
+        inProgress: Number(counts?.in_progress || 0),
+        waitingCustomer: Number(counts?.waiting_customer || 0),
+        resolved: Number(counts?.resolved || 0),
+        closed: Number(counts?.closed || 0),
+        urgent: Number(counts?.urgent || 0),
+      },
+      bySupportLevel: {
+        Dedicated: Number(counts?.dedicated_open || 0),
+        Priority: Number(counts?.priority_open || 0),
+        Standard: Number(counts?.standard_open || 0),
+      },
+    });
+  } catch (error) {
+    console.error("Super Admin support overview error:", error);
+    return res.status(500).json({
+      message: "Failed to load support overview",
+    });
+  }
+});
+
+router.get("/support/options", (_req, res) => {
+  try {
+    const organizations = db
+      .prepare(`
+        SELECT DISTINCT
+          o.id,
+          o.name,
+          o.slug
+        FROM organizations o
+        INNER JOIN support_tickets st
+          ON st.organization_id = o.id
+        ORDER BY o.name ASC
+      `)
+      .all();
+
+    const categories = db
+      .prepare(`
+        SELECT DISTINCT category
+        FROM support_tickets
+        WHERE category IS NOT NULL
+          AND TRIM(category) <> ''
+        ORDER BY category ASC
+      `)
+      .all()
+      .map((row: any) => row.category);
+
+    return res.json({
+      organizations,
+      statuses: [
+        "open",
+        "in_progress",
+        "waiting_customer",
+        "resolved",
+        "closed",
+      ],
+      priorities: ["low", "normal", "high", "urgent"],
+      supportLevels: ["Standard", "Priority", "Dedicated"],
+      categories,
+    });
+  } catch (error) {
+    console.error("Super Admin support options error:", error);
+    return res.status(500).json({
+      message: "Failed to load support filter options",
+    });
+  }
+});
+
+router.get("/support", (req, res) => {
+  try {
+    const requestedPage = Number(req.query.page || 1);
+    const requestedLimit = Number(req.query.limit || 20);
+
+    const page =
+      Number.isInteger(requestedPage) && requestedPage > 0
+        ? requestedPage
+        : 1;
+
+    const limit =
+      Number.isInteger(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, 100)
+        : 20;
+
+    const offset = (page - 1) * limit;
+
+    const search = String(req.query.search || "").trim();
+    const status = normalizeSupportStatus(req.query.status);
+    const priority = normalizeSupportPriority(req.query.priority);
+    const supportLevel = String(req.query.supportLevel || "").trim();
+    const category = String(req.query.category || "").trim();
+    const organizationId = Number(req.query.organizationId || 0);
+
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (search) {
+      const pattern = `%${search}%`;
+      conditions.push(`
+        (
+          st.ticket_number LIKE ?
+          OR st.subject LIKE ?
+          OR st.description LIKE ?
+          OR o.name LIKE ?
+          OR COALESCE(u.name, '') LIKE ?
+          OR COALESCE(u.email, '') LIKE ?
+        )
+      `);
+      params.push(pattern, pattern, pattern, pattern, pattern, pattern);
+    }
+
+    if (status) {
+      if (
+        ![
+          "open",
+          "in_progress",
+          "waiting_customer",
+          "resolved",
+          "closed",
+        ].includes(status)
+      ) {
+        return res.status(400).json({
+          message: "Invalid support ticket status",
+        });
+      }
+
+      conditions.push("st.status = ?");
+      params.push(status);
+    }
+
+    if (priority) {
+      if (!["low", "normal", "high", "urgent"].includes(priority)) {
+        return res.status(400).json({
+          message: "Invalid support ticket priority",
+        });
+      }
+
+      conditions.push("st.priority = ?");
+      params.push(priority);
+    }
+
+    if (supportLevel) {
+      if (!["Standard", "Priority", "Dedicated"].includes(supportLevel)) {
+        return res.status(400).json({
+          message: "Invalid support level",
+        });
+      }
+
+      conditions.push("st.support_level = ?");
+      params.push(supportLevel);
+    }
+
+    if (category) {
+      conditions.push("st.category = ?");
+      params.push(category);
+    }
+
+    if (organizationId) {
+      if (!Number.isInteger(organizationId) || organizationId <= 0) {
+        return res.status(400).json({
+          message: "Invalid organization ID",
+        });
+      }
+
+      conditions.push("st.organization_id = ?");
+      params.push(organizationId);
+    }
+
+    const whereClause =
+      conditions.length > 0
+        ? `WHERE ${conditions.join(" AND ")}`
+        : "";
+
+    const totalRow = db
+      .prepare(`
+        SELECT COUNT(*) AS total
+        FROM support_tickets st
+        INNER JOIN organizations o
+          ON o.id = st.organization_id
+        LEFT JOIN users u
+          ON u.id = st.created_by
+         AND u.organization_id = st.organization_id
+        ${whereClause}
+      `)
+      .get(...params) as { total: number };
+
+    const rows = db
+      .prepare(`
+        ${superAdminSupportTicketSelect}
+        ${whereClause}
+        ORDER BY
+          CASE st.support_level
+            WHEN 'Dedicated' THEN 1
+            WHEN 'Priority' THEN 2
+            ELSE 3
+          END,
+          CASE st.priority
+            WHEN 'urgent' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'normal' THEN 3
+            ELSE 4
+          END,
+          CASE st.status
+            WHEN 'open' THEN 1
+            WHEN 'in_progress' THEN 2
+            WHEN 'waiting_customer' THEN 3
+            WHEN 'resolved' THEN 4
+            ELSE 5
+          END,
+          datetime(st.updated_at) DESC,
+          st.id DESC
+        LIMIT ? OFFSET ?
+      `)
+      .all(...params, limit, offset) as any[];
+
+    const total = Number(totalRow?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return res.json({
+      tickets: rows.map(serializeSuperAdminSupportTicket),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    });
+  } catch (error) {
+    console.error("Super Admin support ticket list error:", error);
+    return res.status(500).json({
+      message: "Failed to load support tickets",
+    });
+  }
+});
+
+router.get("/support/:id", (req, res) => {
+  const ticketId = Number(req.params.id);
+
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({
+      message: "Invalid support ticket ID",
+    });
+  }
+
+  try {
+    const row = db
+      .prepare(`
+        ${superAdminSupportTicketSelect}
+        WHERE st.id = ?
+        LIMIT 1
+      `)
+      .get(ticketId) as any;
+
+    if (!row) {
+      return res.status(404).json({
+        message: "Support ticket not found",
+      });
+    }
+
+    const messages = db
+      .prepare(`
+        SELECT
+          stm.id,
+          stm.ticket_id,
+          stm.organization_id,
+          stm.user_id,
+          stm.sender_type,
+          stm.message,
+          stm.is_internal,
+          stm.created_at,
+          u.name AS user_name,
+          u.email AS user_email,
+          u.role AS user_role
+        FROM support_ticket_messages stm
+        LEFT JOIN users u
+          ON u.id = stm.user_id
+         AND u.organization_id = stm.organization_id
+        WHERE stm.ticket_id = ?
+          AND stm.organization_id = ?
+          AND stm.is_internal = 0
+        ORDER BY datetime(stm.created_at) ASC, stm.id ASC
+      `)
+      .all(ticketId, row.organization_id) as any[];
+
+    return res.json({
+      ticket: serializeSuperAdminSupportTicket(row),
+      messages: messages.map((message) => ({
+        id: message.id,
+        message: message.message,
+        senderType: message.sender_type,
+        createdAt: message.created_at,
+        user: message.user_id
+          ? {
+              id: message.user_id,
+              name: message.user_name,
+              email: message.user_email,
+              role: message.user_role,
+            }
+          : null,
+      })),
+    });
+  } catch (error) {
+    console.error("Super Admin support ticket detail error:", error);
+    return res.status(500).json({
+      message: "Failed to load support ticket",
+    });
+  }
+});
+
+router.post("/support/:id/messages", (req: SuperAdminRequest, res) => {
+  const ticketId = Number(req.params.id);
+  const message =
+    typeof req.body?.message === "string"
+      ? req.body.message.trim()
+      : "";
+
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({
+      message: "Invalid support ticket ID",
+    });
+  }
+
+  if (!message || message.length > 5000) {
+    return res.status(400).json({
+      message: "Reply is required and must be 5,000 characters or fewer.",
+    });
+  }
+
+  try {
+    const ticket = db
+      .prepare(`
+        SELECT id, organization_id, status
+        FROM support_tickets
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .get(ticketId) as
+      | {
+          id: number;
+          organization_id: number;
+          status: string;
+        }
+      | undefined;
+
+    if (!ticket) {
+      return res.status(404).json({
+        message: "Support ticket not found",
+      });
+    }
+
+    if (ticket.status === "closed") {
+      return res.status(409).json({
+        message: "Closed support tickets cannot receive new replies.",
+        code: "SUPPORT_TICKET_CLOSED",
+      });
+    }
+
+    const addReply = db.transaction(() => {
+      const result = db
+        .prepare(`
+          INSERT INTO support_ticket_messages (
+            ticket_id,
+            organization_id,
+            user_id,
+            sender_type,
+            message,
+            is_internal
+          )
+          VALUES (?, ?, NULL, 'support', ?, 0)
+        `)
+        .run(ticketId, ticket.organization_id, message);
+
+      db.prepare(`
+        UPDATE support_tickets
+        SET
+          status = CASE
+            WHEN status IN ('open', 'waiting_customer')
+              THEN 'in_progress'
+            ELSE status
+          END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(ticketId);
+
+      return Number(result.lastInsertRowid);
+    });
+
+    const messageId = addReply();
+
+    return res.status(201).json({
+      message: "Support reply sent successfully",
+      reply: {
+        id: messageId,
+        message,
+        senderType: "support",
+        supportAgent: req.superAdmin?.email || null,
+      },
+    });
+  } catch (error) {
+    console.error("Super Admin support reply error:", error);
+    return res.status(500).json({
+      message: "Failed to send support reply",
+    });
+  }
+});
+
+router.patch("/support/:id", (req, res) => {
+  const ticketId = Number(req.params.id);
+
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({
+      message: "Invalid support ticket ID",
+    });
+  }
+
+  const requestedStatus =
+    req.body?.status === undefined
+      ? undefined
+      : normalizeSupportStatus(req.body.status);
+
+  const requestedPriority =
+    req.body?.priority === undefined
+      ? undefined
+      : normalizeSupportPriority(req.body.priority);
+
+  if (requestedStatus === undefined && requestedPriority === undefined) {
+    return res.status(400).json({
+      message: "Provide a status or priority to update",
+    });
+  }
+
+  if (
+    requestedStatus !== undefined &&
+    ![
+      "open",
+      "in_progress",
+      "waiting_customer",
+      "resolved",
+      "closed",
+    ].includes(requestedStatus)
+  ) {
+    return res.status(400).json({
+      message: "Invalid support ticket status",
+    });
+  }
+
+  if (
+    requestedPriority !== undefined &&
+    !["low", "normal", "high", "urgent"].includes(requestedPriority)
+  ) {
+    return res.status(400).json({
+      message: "Invalid support ticket priority",
+    });
+  }
+
+  try {
+    const existing = db
+      .prepare(`
+        SELECT id, status, priority
+        FROM support_tickets
+        WHERE id = ?
+        LIMIT 1
+      `)
+      .get(ticketId) as
+      | {
+          id: number;
+          status: string;
+          priority: string;
+        }
+      | undefined;
+
+    if (!existing) {
+      return res.status(404).json({
+        message: "Support ticket not found",
+      });
+    }
+
+    const nextStatus = requestedStatus ?? existing.status;
+    const nextPriority = requestedPriority ?? existing.priority;
+
+    db.prepare(`
+      UPDATE support_tickets
+      SET
+        status = ?,
+        priority = ?,
+        resolved_at = CASE
+          WHEN ? = 'resolved'
+            THEN COALESCE(resolved_at, CURRENT_TIMESTAMP)
+          WHEN ? <> 'resolved'
+            THEN NULL
+          ELSE resolved_at
+        END,
+        closed_at = CASE
+          WHEN ? = 'closed'
+            THEN COALESCE(closed_at, CURRENT_TIMESTAMP)
+          WHEN ? <> 'closed'
+            THEN NULL
+          ELSE closed_at
+        END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      nextStatus,
+      nextPriority,
+      nextStatus,
+      nextStatus,
+      nextStatus,
+      nextStatus,
+      ticketId
+    );
+
+    const updated = db
+      .prepare(`
+        ${superAdminSupportTicketSelect}
+        WHERE st.id = ?
+        LIMIT 1
+      `)
+      .get(ticketId) as any;
+
+    return res.json({
+      message: "Support ticket updated successfully",
+      ticket: serializeSuperAdminSupportTicket(updated),
+    });
+  } catch (error) {
+    console.error("Super Admin support ticket update error:", error);
+    return res.status(500).json({
+      message: "Failed to update support ticket",
+    });
+  }
+});
+
+
 export default router;

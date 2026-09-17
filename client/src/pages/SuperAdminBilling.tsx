@@ -1,13 +1,12 @@
+import { useNavigate } from "react-router-dom";
 import {
   useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
-  ArrowLeft,
   BarChart3,
   Building2,
   CalendarDays,
@@ -263,9 +262,9 @@ function SuperAdminBilling() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
+      <div className="px-5 py-7 lg:px-8 lg:py-8 xl:px-10">
+        <div className="mx-auto max-w-[1500px]">
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-[0_3px_16px_rgba(15,23,42,0.035)]">
             Loading subscription revenue...
           </div>
         </div>
@@ -277,42 +276,33 @@ function SuperAdminBilling() {
   const subscriptions = data?.subscriptions || {};
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/super-admin/dashboard")
-              }
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              <ArrowLeft size={16} />
-              Dashboard
-            </button>
-
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">
-                Invent POS
+    <div className="px-5 py-7 text-slate-900 lg:px-8 lg:py-8 xl:px-10">
+      <main className="mx-auto max-w-[1500px]">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-blue-600" />
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
+                Financial Overview
               </p>
-              <h1 className="text-2xl font-bold tracking-tight text-[#0B1F33]">
-                Billing & Revenue
-              </h1>
             </div>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#0B1F33]">
+              Billing & Revenue
+            </h1>
+            <p className="mt-2 text-sm text-slate-500">
+              Track subscription payments, recurring revenue and billing performance.
+            </p>
           </div>
 
           <button
             type="button"
             onClick={() => loadData(true)}
             disabled={refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
           >
             <RefreshCw
               size={16}
-              className={
-                refreshing ? "animate-spin" : ""
-              }
+              className={refreshing ? "animate-spin" : ""}
             />
             {refreshing ? "Refreshing..." : "Refresh"}
           </button>
