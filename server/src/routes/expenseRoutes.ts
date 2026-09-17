@@ -81,6 +81,127 @@ router.use(requireExpenseTracking);
 
 
 // ============================================================
+// BRANCH HELPERS
+// Expenses are owned by the branch where they were incurred.
+// ============================================================
+
+type ExpenseBranchRow = {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
+};
+
+function getActiveOrganizationBranch(
+  organizationId: number,
+  branchId: number
+) {
+  return db
+    .prepare(`
+      SELECT
+        id,
+        name,
+        code,
+        is_active
+      FROM branches
+      WHERE id = ?
+        AND organization_id = ?
+        AND is_active = 1
+      LIMIT 1
+    `)
+    .get(branchId, organizationId) as ExpenseBranchRow | undefined;
+}
+
+function getAuthenticatedExpenseBranch(
+  req: AuthRequest,
+  organizationId: number
+) {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return undefined;
+  }
+
+  return db
+    .prepare(`
+      SELECT
+        b.id,
+        b.name,
+        b.code,
+        b.is_active
+      FROM users u
+      INNER JOIN branches b
+        ON b.id = u.branch_id
+       AND b.organization_id = u.organization_id
+      WHERE u.id = ?
+        AND u.organization_id = ?
+        AND u.is_active = 1
+        AND b.is_active = 1
+      LIMIT 1
+    `)
+    .get(userId, organizationId) as ExpenseBranchRow | undefined;
+}
+
+function canSelectExpenseBranch(req: AuthRequest) {
+  const role = String(req.user?.role || "").toLowerCase();
+  return role === "admin" || role === "manager";
+}
+
+function resolveExpenseBranch(
+  req: AuthRequest,
+  organizationId: number,
+  requestedBranchId?: unknown
+) {
+  if (canSelectExpenseBranch(req) && requestedBranchId !== undefined) {
+    const branchId = Number(requestedBranchId);
+
+    if (!Number.isInteger(branchId) || branchId <= 0) {
+      return {
+        error: "Invalid branch ID",
+        branch: undefined,
+      };
+    }
+
+    const branch = getActiveOrganizationBranch(
+      organizationId,
+      branchId
+    );
+
+    if (!branch) {
+      return {
+        error:
+          "Selected branch was not found or is inactive",
+        branch: undefined,
+      };
+    }
+
+    return {
+      error: undefined,
+      branch,
+    };
+  }
+
+  const branch = getAuthenticatedExpenseBranch(
+    req,
+    organizationId
+  );
+
+  if (!branch) {
+    return {
+      error:
+        "Your user account is not assigned to an active branch",
+      branch: undefined,
+    };
+  }
+
+  return {
+    error: undefined,
+    branch,
+  };
+}
+
+
+// ============================================================
 // CREATE EXPENSE
 // POST /api/expenses
 // ============================================================
@@ -96,6 +217,7 @@ router.post("/", (req: AuthRequest, res) => {
       paymentMethod,
       description,
       expenseDate,
+      branchId,
     } = req.body;
 
     if (
@@ -163,6 +285,22 @@ router.post("/", (req: AuthRequest, res) => {
       });
     }
 
+    const branchResolution = resolveExpenseBranch(
+      req,
+      organizationId,
+      branchId
+    );
+
+    if (!branchResolution.branch) {
+      return res.status(400).json({
+        message:
+          branchResolution.error ||
+          "Unable to resolve expense branch",
+      });
+    }
+
+    const expenseBranch = branchResolution.branch;
+
     const result = db
       .prepare(`
         INSERT INTO expenses (
@@ -173,9 +311,10 @@ router.post("/", (req: AuthRequest, res) => {
           description,
           recorded_by,
           expense_date,
-          organization_id
+          organization_id,
+          branch_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         title.trim(),
@@ -188,17 +327,23 @@ router.post("/", (req: AuthRequest, res) => {
           : null,
         req.user.id,
         expenseDate,
-        organizationId
+        organizationId,
+        expenseBranch.id
       );
 
     const expense = db
       .prepare(`
         SELECT
           expenses.*,
-          users.name AS recorded_by_name
+          users.name AS recorded_by_name,
+          branches.name AS branch_name,
+          branches.code AS branch_code
         FROM expenses
         LEFT JOIN users
           ON users.id = expenses.recorded_by
+        LEFT JOIN branches
+          ON branches.id = expenses.branch_id
+         AND branches.organization_id = expenses.organization_id
         WHERE expenses.id = ?
           AND expenses.organization_id = ?
       `)
@@ -233,6 +378,9 @@ router.post("/", (req: AuthRequest, res) => {
 // ?paymentMethod=
 // ?startDate=
 // ?endDate=
+// ?branchId=
+// Admin/Manager may select a branch. Other roles are locked to
+// their assigned active branch.
 // ============================================================
 
 router.get("/", (req: AuthRequest, res) => {
@@ -264,11 +412,34 @@ router.get("/", (req: AuthRequest, res) => {
         ? req.query.endDate.trim()
         : "";
 
+    const requestedBranchId =
+      typeof req.query.branchId === "string"
+        ? req.query.branchId.trim()
+        : "";
+
+    const branchResolution = resolveExpenseBranch(
+      req,
+      organizationId,
+      requestedBranchId || undefined
+    );
+
+    if (!branchResolution.branch) {
+      return res.status(400).json({
+        message:
+          branchResolution.error ||
+          "Unable to resolve expense branch",
+      });
+    }
+
+    const expenseBranch = branchResolution.branch;
+
     const conditions: string[] = [
       "expenses.organization_id = ?",
+      "expenses.branch_id = ?",
     ];
     const params: any[] = [
       organizationId,
+      expenseBranch.id,
     ];
 
     if (search) {
@@ -343,10 +514,15 @@ router.get("/", (req: AuthRequest, res) => {
       .prepare(`
         SELECT
           expenses.*,
-          users.name AS recorded_by_name
+          users.name AS recorded_by_name,
+          branches.name AS branch_name,
+          branches.code AS branch_code
         FROM expenses
         LEFT JOIN users
           ON users.id = expenses.recorded_by
+        LEFT JOIN branches
+          ON branches.id = expenses.branch_id
+         AND branches.organization_id = expenses.organization_id
         ${where}
         ORDER BY
           expenses.expense_date DESC,
@@ -404,6 +580,9 @@ router.get("/", (req: AuthRequest, res) => {
         payment_method: paymentMethod,
         start_date: startDate || null,
         end_date: endDate || null,
+        branch_id: expenseBranch.id,
+        branch_name: expenseBranch.name,
+        branch_code: expenseBranch.code,
       },
 
       summary: {
@@ -483,6 +662,7 @@ router.put("/:id", (req: AuthRequest, res) => {
       paymentMethod,
       description,
       expenseDate,
+      branchId,
     } = req.body;
 
     if (
@@ -544,6 +724,50 @@ router.put("/:id", (req: AuthRequest, res) => {
       });
     }
 
+    const existingExpenseRow = existingExpense as {
+      branch_id?: number | null;
+    };
+
+    let targetBranchId = existingExpenseRow.branch_id;
+
+    if (
+      canSelectExpenseBranch(req) &&
+      branchId !== undefined
+    ) {
+      const branchResolution = resolveExpenseBranch(
+        req,
+        organizationId,
+        branchId
+      );
+
+      if (!branchResolution.branch) {
+        return res.status(400).json({
+          message:
+            branchResolution.error ||
+            "Unable to resolve expense branch",
+        });
+      }
+
+      targetBranchId = branchResolution.branch.id;
+    }
+
+    if (!targetBranchId) {
+      const branchResolution = resolveExpenseBranch(
+        req,
+        organizationId
+      );
+
+      if (!branchResolution.branch) {
+        return res.status(400).json({
+          message:
+            branchResolution.error ||
+            "Unable to resolve expense branch",
+        });
+      }
+
+      targetBranchId = branchResolution.branch.id;
+    }
+
     db.prepare(`
       UPDATE expenses
 
@@ -553,7 +777,8 @@ router.put("/:id", (req: AuthRequest, res) => {
         amount = ?,
         payment_method = ?,
         description = ?,
-        expense_date = ?
+        expense_date = ?,
+        branch_id = ?
 
       WHERE id = ?
         AND organization_id = ?
@@ -567,6 +792,7 @@ router.put("/:id", (req: AuthRequest, res) => {
         ? description.trim()
         : null,
       expenseDate,
+      targetBranchId,
       expenseId,
       organizationId
     );
@@ -575,12 +801,18 @@ router.put("/:id", (req: AuthRequest, res) => {
       .prepare(`
         SELECT
           expenses.*,
-          users.name AS recorded_by_name
+          users.name AS recorded_by_name,
+          branches.name AS branch_name,
+          branches.code AS branch_code
 
         FROM expenses
 
         LEFT JOIN users
           ON users.id = expenses.recorded_by
+
+        LEFT JOIN branches
+          ON branches.id = expenses.branch_id
+         AND branches.organization_id = expenses.organization_id
 
         WHERE expenses.id = ?
           AND expenses.organization_id = ?

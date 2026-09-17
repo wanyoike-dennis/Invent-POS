@@ -14,6 +14,24 @@ type ReportData = {
   filters: {
     start_date: string | null;
     end_date: string | null;
+    branch_id: number | null;
+  };
+
+  scope: {
+    type: "all_branches" | "branch";
+    multi_branch_reports: boolean;
+    branch: {
+      id: number;
+      name: string;
+      code: string | null;
+      is_active: boolean;
+    } | null;
+    home_branch: {
+      id: number;
+      name: string;
+      code: string | null;
+      is_active: boolean;
+    };
   };
 
   summary: {
@@ -55,6 +73,13 @@ type ReportData = {
   }[];
 };
 
+type Branch = {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
+};
+
 function Reports() {
   const [reportData, setReportData] =
     useState<ReportData | null>(null);
@@ -65,9 +90,19 @@ function Reports() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
+  const [branches, setBranches] =
+    useState<Branch[]>([]);
+
+  const [selectedBranchId, setSelectedBranchId] =
+    useState("");
+
+  const [branchesLoading, setBranchesLoading] =
+    useState(true);
+
   const fetchReports = async (
     start = startDate,
-    end = endDate
+    end = endDate,
+    branchId = selectedBranchId
   ) => {
     try {
       setLoading(true);
@@ -83,6 +118,10 @@ function Reports() {
         params.set("endDate", end);
       }
 
+      if (branchId) {
+        params.set("branchId", branchId);
+      }
+
       const query = params.toString();
 
       const response = await apiFetch(
@@ -90,12 +129,26 @@ function Reports() {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to load reports");
+        const result = await response.json();
+
+        throw new Error(
+          result.message || "Failed to load reports"
+        );
       }
 
-      const data = await response.json();
+      const data: ReportData = await response.json();
 
       setReportData(data);
+
+      if (
+        data.scope.type === "branch" &&
+        data.scope.branch &&
+        !data.scope.multi_branch_reports
+      ) {
+        setSelectedBranchId(
+          String(data.scope.branch.id)
+        );
+      }
     } catch (error) {
       console.error(
         "Error loading reports:",
@@ -103,7 +156,9 @@ function Reports() {
       );
 
       setError(
-        "Could not load reporting data."
+        error instanceof Error
+          ? error.message
+          : "Could not load reporting data."
       );
     } finally {
       setLoading(false);
@@ -111,8 +166,51 @@ function Reports() {
   };
 
   useEffect(() => {
-    fetchReports("", "");
+    const loadReportPage = async () => {
+      try {
+        setBranchesLoading(true);
+
+        const branchResponse =
+          await apiFetch("/api/branches");
+
+        const branchResult =
+          await branchResponse.json();
+
+        if (branchResponse.ok) {
+          const branchList: Branch[] =
+            Array.isArray(branchResult)
+              ? branchResult
+              : Array.isArray(branchResult.branches)
+                ? branchResult.branches
+                : [];
+
+          setBranches(branchList);
+        }
+
+        await fetchReports("", "", "");
+      } catch (error) {
+        console.error(
+          "Error loading report page:",
+          error
+        );
+      } finally {
+        setBranchesLoading(false);
+      }
+    };
+
+    loadReportPage();
   }, []);
+
+  const handleBranchChange = async (
+    branchId: string
+  ) => {
+    setSelectedBranchId(branchId);
+    await fetchReports(
+      startDate,
+      endDate,
+      branchId
+    );
+  };
 
   const formatCurrency = (amount: number) => {
     return `KES ${Number(
@@ -186,14 +284,22 @@ function Reports() {
     setStartDate(start);
     setEndDate(end);
 
-    fetchReports(start, end);
+    fetchReports(
+      start,
+      end,
+      selectedBranchId
+    );
   };
 
   const clearFilters = () => {
     setStartDate("");
     setEndDate("");
 
-    fetchReports("", "");
+    fetchReports(
+      "",
+      "",
+      selectedBranchId
+    );
   };
 
   const handleApplyFilters = (
@@ -217,15 +323,85 @@ function Reports() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800">
-          Reports
-        </h1>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">
+            Reports
+          </h1>
 
-        <p className="mt-1 text-slate-500">
-          Analyze sales, refunds, expenses, profit, and payment methods.
-        </p>
+          <p className="mt-1 text-slate-500">
+            Analyze sales, refunds, expenses, profit, and payment methods.
+          </p>
+        </div>
+
+        <div className="w-full sm:w-auto sm:min-w-[260px]">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Viewing Branch
+          </label>
+
+          {reportData?.scope.multi_branch_reports ? (
+            <select
+              value={selectedBranchId}
+              onChange={(event) =>
+                handleBranchChange(
+                  event.target.value
+                )
+              }
+              disabled={branchesLoading}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+            >
+              <option value="">
+                All Branches
+              </option>
+
+              {branches.map((branch) => (
+                <option
+                  key={branch.id}
+                  value={branch.id}
+                >
+                  {branch.name}
+                  {branch.code
+                    ? ` (${branch.code})`
+                    : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700">
+              {reportData?.scope.branch?.name ||
+                reportData?.scope.home_branch.name ||
+                "Assigned Branch"}
+              {(reportData?.scope.branch?.code ||
+                reportData?.scope.home_branch.code)
+                ? ` (${
+                    reportData?.scope.branch?.code ||
+                    reportData?.scope.home_branch.code
+                  })`
+                : ""}
+            </div>
+          )}
+        </div>
       </div>
+
+      {reportData && (
+        <div className="rounded-xl border border-blue-100 bg-blue-50 px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+            Current Report Scope
+          </p>
+
+          <p className="mt-1 font-semibold text-slate-800">
+            {reportData.scope.type === "all_branches"
+              ? "All Branches"
+              : reportData.scope.branch
+                ? `${reportData.scope.branch.name}${
+                    reportData.scope.branch.code
+                      ? ` (${reportData.scope.branch.code})`
+                      : ""
+                  }`
+                : "Assigned Branch"}
+          </p>
+        </div>
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4">

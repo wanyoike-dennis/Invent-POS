@@ -46,6 +46,8 @@ type Sale = {
   cash_amount: number;
   mpesa_amount: number;
   sold_by_name: string | null;
+  branch_name: string | null;
+  branch_code: string | null;
   customer_id: number | null;
   customer_name: string | null;
   customer_phone: string | null;
@@ -465,7 +467,9 @@ function Sales() {
         sale.receipt_number.toLowerCase().includes(search) ||
         (sale.sold_by_name || "").toLowerCase().includes(search) ||
         (sale.customer_name || "Walk-in Customer").toLowerCase().includes(search) ||
-        (sale.customer_phone || "").toLowerCase().includes(search);
+        (sale.customer_phone || "").toLowerCase().includes(search) ||
+        (sale.branch_name || "").toLowerCase().includes(search) ||
+        (sale.branch_code || "").toLowerCase().includes(search);
 
       const matchesPayment =
         paymentFilter === "All" ||
@@ -1262,6 +1266,19 @@ function Sales() {
                   <p className="mt-1 font-medium text-slate-800">
                     {selectedSale.sale.sold_by_name ||
                       "Unknown"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Branch
+                  </p>
+
+                  <p className="mt-1 font-medium text-slate-800">
+                    {selectedSale.sale.branch_name || "Main Branch"}
+                    {selectedSale.sale.branch_code
+                      ? ` (${selectedSale.sale.branch_code})`
+                      : ""}
                   </p>
                 </div>
 
@@ -2936,6 +2953,10 @@ function Sales() {
                   </th>
 
                   <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                    Branch
+                  </th>
+
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
                     Date
                   </th>
 
@@ -3045,6 +3066,17 @@ function Sales() {
 
                       <td className="whitespace-nowrap px-6 py-4 text-slate-600">
                         {sale.sold_by_name || "Unknown"}
+                      </td>
+
+                      <td className="whitespace-nowrap px-6 py-4 text-slate-600">
+                        <div className="font-medium text-slate-700">
+                          {sale.branch_name || "Main Branch"}
+                        </div>
+                        {sale.branch_code && (
+                          <div className="mt-0.5 text-xs text-slate-400">
+                            {sale.branch_code}
+                          </div>
+                        )}
                       </td>
 
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500">

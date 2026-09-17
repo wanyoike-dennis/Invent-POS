@@ -5,6 +5,68 @@ import { authorizeRoles } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
+const requireCustomerExpenseTracking = (
+  req: AuthRequest,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  try {
+    const organizationId = req.user!.organizationId;
+
+    const feature = db
+      .prepare(`
+        SELECT spf.feature_value
+        FROM organizations o
+        INNER JOIN subscription_plans sp
+          ON LOWER(sp.code) = LOWER(o.subscription_plan)
+        INNER JOIN subscription_plan_features spf
+          ON spf.plan_id = sp.id
+        WHERE o.id = ?
+          AND spf.feature_key = 'customer_expense_tracking'
+          AND sp.is_active = 1
+        LIMIT 1
+      `)
+      .get(organizationId) as
+      | { feature_value: string | null }
+      | undefined;
+
+    const normalized = String(
+      feature?.feature_value || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const included =
+      normalized === "included" ||
+      normalized === "true" ||
+      normalized === "1" ||
+      normalized === "yes";
+
+    if (!included) {
+      return res.status(403).json({
+        message:
+          "Customer & Expense Tracking is not included in your current subscription plan. Upgrade your subscription to access Customers.",
+        code: "PLAN_FEATURE_NOT_INCLUDED",
+        feature: "customer_expense_tracking",
+      });
+    }
+
+    return next();
+  } catch (error) {
+    console.error(
+      "Customer entitlement check error:",
+      error
+    );
+
+    return res.status(500).json({
+      message:
+        "Failed to verify subscription feature access",
+    });
+  }
+};
+
+router.use(requireCustomerExpenseTracking);
+
 type CustomerRow = {
   id: number;
   name: string;

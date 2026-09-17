@@ -145,6 +145,44 @@ const parseLocalDate = (value: string) => {
   return parsed;
 };
 
+type SaleBranch = {
+  id: number;
+  name: string;
+  code: string | null;
+};
+
+const getAuthenticatedSaleBranch = (
+  userId: number,
+  organizationId: number
+): SaleBranch => {
+  const branch = db
+    .prepare(`
+      SELECT
+        branches.id,
+        branches.name,
+        branches.code
+      FROM users
+      INNER JOIN branches
+        ON branches.id = users.branch_id
+        AND branches.organization_id = users.organization_id
+      WHERE users.id = ?
+        AND users.organization_id = ?
+        AND users.is_active = 1
+        AND branches.is_active = 1
+      LIMIT 1
+    `)
+    .get(userId, organizationId) as SaleBranch | undefined;
+
+  if (!branch) {
+    throw new Error(
+      "Your account is not assigned to an active branch. Contact your organization Admin."
+    );
+  }
+
+  return branch;
+};
+
+
 // ============================================================
 // GET ALL SALES
 // Refund-aware sales history
@@ -161,6 +199,8 @@ router.get("/", (req: AuthRequest, res) => {
           users.name AS sold_by_name,
           customers.name AS customer_name,
           customers.phone AS customer_phone,
+          branches.name AS branch_name,
+          branches.code AS branch_code,
 
           COALESCE(
             (
@@ -178,6 +218,10 @@ router.get("/", (req: AuthRequest, res) => {
 
         LEFT JOIN customers
           ON customers.id = sales.customer_id
+
+        LEFT JOIN branches
+          ON branches.id = sales.branch_id
+          AND branches.organization_id = sales.organization_id
 
         WHERE sales.organization_id = ?
         ${
@@ -305,6 +349,19 @@ router.post("/", (req: AuthRequest, res) => {
   }
 
   try {
+    const authenticatedUserId = req.user?.id;
+
+    if (!authenticatedUserId) {
+      return res.status(401).json({
+        message: "You must be logged in to complete a sale",
+      });
+    }
+
+    const saleBranch = getAuthenticatedSaleBranch(
+      authenticatedUserId,
+      organizationId
+    );
+
     const createSale = db.transaction(() => {
       let total = 0;
 
@@ -354,16 +411,21 @@ router.post("/", (req: AuthRequest, res) => {
         const product = db
           .prepare(`
             SELECT
-              id,
-              name,
-              price,
-              cost_price,
-              stock
-            FROM products
-            WHERE id = ?
-              AND organization_id = ?
+              p.id,
+              p.name,
+              p.price,
+              p.cost_price,
+              COALESCE(bi.stock, 0) AS stock
+            FROM products p
+            LEFT JOIN branch_inventory bi
+              ON bi.product_id = p.id
+              AND bi.branch_id = ?
+              AND bi.organization_id = p.organization_id
+            WHERE p.id = ?
+              AND p.organization_id = ?
           `)
           .get(
+            saleBranch.id,
             item.productId,
             organizationId
           ) as
@@ -447,9 +509,10 @@ router.post("/", (req: AuthRequest, res) => {
             cash_amount,
             mpesa_amount,
             customer_id,
-            organization_id
+            organization_id,
+            branch_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           receiptNumber,
@@ -458,13 +521,14 @@ router.post("/", (req: AuthRequest, res) => {
           paid,
           changeAmount,
           storedMpesaCode,
-          req.user?.id || null,
+          authenticatedUserId,
           formatLocalDate(new Date()),
           0,
           allocatedCash,
           allocatedMpesa,
           selectedCustomerId,
-          organizationId
+          organizationId,
+          saleBranch.id
         );
 
       const saleId =
@@ -492,6 +556,19 @@ router.post("/", (req: AuthRequest, res) => {
           AND organization_id = ?
       `);
 
+      // Reduce stock only from the branch where this sale is being made.
+      // products.stock remains synchronized as the organization-wide aggregate
+      // while older inventory screens/routes are migrated.
+      const reduceBranchStock = db.prepare(`
+        UPDATE branch_inventory
+        SET stock = stock - ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE organization_id = ?
+          AND branch_id = ?
+          AND product_id = ?
+          AND stock >= ?
+      `);
+
       // Record stock movement
       const recordStockMovement = db.prepare(`
         INSERT INTO stock_movements (
@@ -499,9 +576,10 @@ router.post("/", (req: AuthRequest, res) => {
           type,
           quantity,
           reason,
-          organization_id
+          organization_id,
+            branch_id
         )
-        VALUES (?, 'out', ?, ?, ?)
+        VALUES (?, 'out', ?, ?, ?, ?)
       `);
 
       for (const item of preparedItems) {
@@ -515,6 +593,20 @@ router.post("/", (req: AuthRequest, res) => {
           item.subtotal
         );
 
+        const branchStockUpdate = reduceBranchStock.run(
+          item.quantity,
+          organizationId,
+          saleBranch.id,
+          item.id,
+          item.quantity
+        );
+
+        if (branchStockUpdate.changes !== 1) {
+          throw new Error(
+            `Not enough stock for ${item.name} at ${saleBranch.name}`
+          );
+        }
+
         reduceStock.run(
           item.quantity,
           item.id,
@@ -525,7 +617,8 @@ router.post("/", (req: AuthRequest, res) => {
           item.id,
           item.quantity,
           `Sale ${receiptNumber}`,
-          organizationId
+          organizationId,
+          saleBranch.id
         );
       }
 
@@ -540,6 +633,8 @@ router.post("/", (req: AuthRequest, res) => {
         mpesaAmount: allocatedMpesa,
         mpesaCode: storedMpesaCode,
         customerId: selectedCustomerId,
+        branchId: saleBranch.id,
+        branch: saleBranch,
         customer: selectedCustomer
           ? {
               id: selectedCustomer.id,
@@ -659,6 +754,19 @@ router.post(
       formatLocalDate(parsedSaleDate);
 
     try {
+      const authenticatedUserId = req.user?.id;
+
+      if (!authenticatedUserId) {
+        return res.status(401).json({
+          message: "You must be logged in to record a past sale",
+        });
+      }
+
+      const saleBranch = getAuthenticatedSaleBranch(
+        authenticatedUserId,
+        organizationId
+      );
+
       const createPastSale = db.transaction(() => {
         let total = 0;
 
@@ -707,16 +815,21 @@ router.post(
           const product = db
             .prepare(`
               SELECT
-                id,
-                name,
-                price,
-                cost_price,
-                stock
-              FROM products
-              WHERE id = ?
-                AND organization_id = ?
+                p.id,
+                p.name,
+                p.price,
+                p.cost_price,
+                COALESCE(bi.stock, 0) AS stock
+              FROM products p
+              LEFT JOIN branch_inventory bi
+                ON bi.product_id = p.id
+                AND bi.branch_id = ?
+                AND bi.organization_id = p.organization_id
+              WHERE p.id = ?
+                AND p.organization_id = ?
             `)
             .get(
+              saleBranch.id,
               item.productId,
               organizationId
             ) as
@@ -797,9 +910,10 @@ router.post(
               cash_amount,
               mpesa_amount,
               customer_id,
-              organization_id
+              organization_id,
+              branch_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `)
           .run(
             receiptNumber,
@@ -808,13 +922,14 @@ router.post(
             paid,
             changeAmount,
             storedMpesaCode,
-            req.user?.id || null,
+            authenticatedUserId,
             backdatedSaleDate,
             1,
             allocatedCash,
             allocatedMpesa,
             selectedCustomerId,
-            organizationId
+            organizationId,
+            saleBranch.id
           );
 
         const saleId =
@@ -840,15 +955,26 @@ router.post(
             AND organization_id = ?
         `);
 
+        const reduceBranchStock = db.prepare(`
+          UPDATE branch_inventory
+          SET stock = stock - ?,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE organization_id = ?
+            AND branch_id = ?
+            AND product_id = ?
+            AND stock >= ?
+        `);
+
         const recordStockMovement = db.prepare(`
           INSERT INTO stock_movements (
             product_id,
             type,
             quantity,
             reason,
-            organization_id
+            organization_id,
+            branch_id
           )
-          VALUES (?, 'out', ?, ?, ?)
+          VALUES (?, 'out', ?, ?, ?, ?)
         `);
 
         for (const item of preparedItems) {
@@ -862,6 +988,20 @@ router.post(
             item.subtotal
           );
 
+          const branchStockUpdate = reduceBranchStock.run(
+            item.quantity,
+            organizationId,
+            saleBranch.id,
+            item.id,
+            item.quantity
+          );
+
+          if (branchStockUpdate.changes !== 1) {
+            throw new Error(
+              `Not enough stock for ${item.name} at ${saleBranch.name}`
+            );
+          }
+
           reduceStock.run(
             item.quantity,
             item.id,
@@ -872,7 +1012,8 @@ router.post(
             item.id,
             item.quantity,
             `Backdated sale ${receiptNumber} (${backdatedSaleDate})`,
-            organizationId
+            organizationId,
+            saleBranch.id
           );
         }
 
@@ -887,6 +1028,8 @@ router.post(
           mpesaAmount: allocatedMpesa,
           mpesaCode: storedMpesaCode,
           customerId: selectedCustomerId,
+          branchId: saleBranch.id,
+          branch: saleBranch,
           customer: selectedCustomer
             ? {
                 id: selectedCustomer.id,
@@ -999,12 +1142,17 @@ router.get("/:id", (req: AuthRequest, res) => {
           customers.name AS customer_name,
           customers.phone AS customer_phone,
           customers.email AS customer_email,
-          customers.address AS customer_address
+          customers.address AS customer_address,
+          branches.name AS branch_name,
+          branches.code AS branch_code
         FROM sales
         LEFT JOIN users
           ON users.id = sales.sold_by
         LEFT JOIN customers
           ON customers.id = sales.customer_id
+        LEFT JOIN branches
+          ON branches.id = sales.branch_id
+          AND branches.organization_id = sales.organization_id
         WHERE sales.id = ?
           AND sales.organization_id = ?
           ${
@@ -1260,7 +1408,8 @@ router.post(
           SELECT
             id,
             receipt_number,
-            total
+            total,
+            branch_id
           FROM sales
           WHERE id = ?
             AND organization_id = ?
@@ -1273,12 +1422,38 @@ router.post(
             id: number;
             receipt_number: string;
             total: number;
+            branch_id: number | null;
           }
         | undefined;
 
       if (!sale) {
         return res.status(404).json({
           message: "Sale not found",
+        });
+      }
+
+
+      if (!sale.branch_id) {
+        return res.status(400).json({
+          message:
+            "This sale is not assigned to a branch, so its stock cannot be restored safely.",
+        });
+      }
+
+      const originalSaleBranch = db
+        .prepare(`
+          SELECT id, name, code
+          FROM branches
+          WHERE id = ?
+            AND organization_id = ?
+          LIMIT 1
+        `)
+        .get(sale.branch_id, organizationId) as SaleBranch | undefined;
+
+      if (!originalSaleBranch) {
+        return res.status(400).json({
+          message:
+            "The original sale branch could not be found. Stock was not changed.",
         });
       }
 
@@ -1573,6 +1748,22 @@ router.post(
             `);
 
 
+          const restoreBranchStock =
+            db.prepare(`
+              INSERT INTO branch_inventory (
+                organization_id,
+                branch_id,
+                product_id,
+                stock
+              )
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(branch_id, product_id)
+              DO UPDATE SET
+                stock = branch_inventory.stock + excluded.stock,
+                updated_at = CURRENT_TIMESTAMP
+            `);
+
+
           // ----------------------------------------------------
           // Prepare stock movement
           // ----------------------------------------------------
@@ -1584,10 +1775,11 @@ router.post(
                 type,
                 quantity,
                 reason,
-                organization_id
+                organization_id,
+            branch_id
               )
 
-              VALUES (?, 'in', ?, ?, ?)
+              VALUES (?, 'in', ?, ?, ?, ?)
             `);
 
 
@@ -1617,6 +1809,16 @@ router.post(
               organizationId
             );
 
+            // A return always restores stock to the branch that made
+            // the original sale, not the branch of the staff member
+            // processing the refund.
+            restoreBranchStock.run(
+              organizationId,
+              originalSaleBranch.id,
+              item.productId,
+              item.quantity
+            );
+
 
             // Record inventory movement
             recordStockMovement.run(
@@ -1625,7 +1827,8 @@ router.post(
 
               `Return ${sale.receipt_number}: ` +
                 `${reason.trim()}`,
-              organizationId
+              organizationId,
+              originalSaleBranch.id
             );
           }
 

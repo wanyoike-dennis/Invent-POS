@@ -12,6 +12,16 @@ interface Expense {
   recorded_by_name: string | null;
   expense_date: string;
   created_at: string;
+  branch_id: number | null;
+  branch_name: string | null;
+  branch_code: string | null;
+}
+
+interface Branch {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
 }
 
 interface ExpenseSummary {
@@ -28,6 +38,9 @@ interface ExpenseResponse {
     payment_method: string;
     start_date: string | null;
     end_date: string | null;
+    branch_id: number;
+    branch_name: string;
+    branch_code: string | null;
   };
   summary: ExpenseSummary;
   expenses: Expense[];
@@ -40,6 +53,7 @@ interface ExpenseForm {
   paymentMethod: "Cash" | "M-Pesa";
   description: string;
   expenseDate: string;
+  branchId: string;
 }
 
 interface ExpenseFilters {
@@ -80,6 +94,7 @@ const createEmptyForm = (): ExpenseForm => ({
   paymentMethod: "Cash",
   description: "",
   expenseDate: getToday(),
+  branchId: "",
 });
 
 const createEmptyFilters = (): ExpenseFilters => ({
@@ -136,6 +151,75 @@ function Expenses() {
       createEmptyFilters()
     );
 
+  const [branches, setBranches] =
+    useState<Branch[]>([]);
+
+  const [selectedBranchId, setSelectedBranchId] =
+    useState("");
+
+  const [branchesLoading, setBranchesLoading] =
+    useState(true);
+
+  // ==========================================================
+  // FETCH BRANCHES
+  // ==========================================================
+
+  const fetchBranches = useCallback(async () => {
+    try {
+      setBranchesLoading(true);
+
+      const response = await apiFetch("/api/branches");
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.message || "Failed to load branches"
+        );
+      }
+
+      const branchList: Branch[] = Array.isArray(result)
+        ? result
+        : Array.isArray(result.branches)
+          ? result.branches
+          : [];
+
+      const activeBranches = branchList.filter(
+        (branch) => Number(branch.is_active) === 1
+      );
+
+      setBranches(activeBranches);
+
+      setSelectedBranchId((current) => {
+        if (
+          current &&
+          activeBranches.some(
+            (branch) => String(branch.id) === current
+          )
+        ) {
+          return current;
+        }
+
+        return activeBranches.length > 0
+          ? String(activeBranches[0].id)
+          : "";
+      });
+    } catch (err) {
+      console.error("Fetch branches error:", err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load branches"
+      );
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchBranches();
+  }, [fetchBranches]);
+
   // ==========================================================
   // FETCH EXPENSES
   // ==========================================================
@@ -147,6 +231,10 @@ function Expenses() {
 
       const params =
         new URLSearchParams();
+
+      if (selectedBranchId) {
+        params.set("branchId", selectedBranchId);
+      }
 
       if (filters.search.trim()) {
         params.set(
@@ -229,7 +317,7 @@ function Expenses() {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, selectedBranchId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -267,9 +355,10 @@ function Expenses() {
   // ==========================================================
 
   const openAddModal = () => {
-    setForm(
-      createEmptyForm()
-    );
+    setForm({
+      ...createEmptyForm(),
+      branchId: selectedBranchId,
+    });
 
     setError("");
     setSuccess("");
@@ -297,6 +386,9 @@ function Expenses() {
       paymentMethod: expense.payment_method,
       description: expense.description || "",
       expenseDate: expense.expense_date,
+      branchId: expense.branch_id
+        ? String(expense.branch_id)
+        : selectedBranchId,
     });
 
     setError("");
@@ -340,6 +432,7 @@ function Expenses() {
             paymentMethod: form.paymentMethod,
             description: form.description,
             expenseDate: form.expenseDate,
+            branchId: Number(form.branchId),
           }),
         }
       );
@@ -466,6 +559,8 @@ function Expenses() {
                 form.description,
               expenseDate:
                 form.expenseDate,
+              branchId:
+                Number(form.branchId),
             }),
           }
         );
@@ -542,13 +637,50 @@ function Expenses() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openAddModal}
-          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700"
-        >
-          + Add Expense
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="min-w-[220px]">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Viewing Branch
+            </label>
+
+            <select
+              value={selectedBranchId}
+              onChange={(e) => {
+                setSelectedBranchId(e.target.value);
+                setSuccess("");
+              }}
+              disabled={branchesLoading || branches.length === 0}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100"
+            >
+              {branches.length === 0 ? (
+                <option value="">
+                  No active branches
+                </option>
+              ) : (
+                branches.map((branch) => (
+                  <option
+                    key={branch.id}
+                    value={branch.id}
+                  >
+                    {branch.name}
+                    {branch.code
+                      ? ` (${branch.code})`
+                      : ""}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={openAddModal}
+            disabled={!selectedBranchId}
+            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            + Add Expense
+          </button>
+        </div>
       </div>
 
       {/* ERROR */}
@@ -840,6 +972,10 @@ function Expenses() {
                   </th>
 
                   <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Branch
+                  </th>
+
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Recorded By
                   </th>
 
@@ -894,6 +1030,19 @@ function Expenses() {
                             expense.payment_method
                           }
                         </span>
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-sm text-gray-600">
+                        <div>
+                          <p className="font-medium text-gray-700">
+                            {expense.branch_name || "—"}
+                          </p>
+                          {expense.branch_code && (
+                            <p className="text-xs text-gray-400">
+                              {expense.branch_code}
+                            </p>
+                          )}
+                        </div>
                       </td>
 
                       <td className="whitespace-nowrap px-5 py-4 text-sm text-gray-600">
@@ -1012,6 +1161,31 @@ function Expenses() {
 
             <form onSubmit={handleEditExpense}>
               <div className="grid gap-5 p-6 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Branch
+                  </label>
+                  <select
+                    required
+                    value={form.branchId}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branchId: e.target.value,
+                      })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="">Select branch</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.name}
+                        {branch.code ? ` (${branch.code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="sm:col-span-2">
                   <label className="mb-1.5 block text-sm font-medium text-gray-700">
                     Expense Title
@@ -1172,6 +1346,33 @@ function Expenses() {
               }
             >
               <div className="grid gap-5 p-6 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Branch
+                  </label>
+
+                  <select
+                    required
+                    value={form.branchId}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        branchId: e.target.value,
+                      })
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="">Select branch</option>
+
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.name}
+                        {branch.code ? ` (${branch.code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="sm:col-span-2">
                   <label className="mb-1.5 block text-sm font-medium text-gray-700">
                     Expense Title

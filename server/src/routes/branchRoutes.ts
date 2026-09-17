@@ -424,6 +424,25 @@ router.patch("/:id/status", (req: AuthRequest, res) => {
           code: "LAST_ACTIVE_BRANCH",
         });
       }
+
+      const activeStaff = db
+        .prepare(`
+          SELECT COUNT(*) AS count
+          FROM users
+          WHERE organization_id = ?
+            AND branch_id = ?
+            AND is_active = 1
+        `)
+        .get(organizationId, branchId) as { count: number };
+
+      if (activeStaff.count > 0) {
+        return res.status(409).json({
+          message:
+            "Reassign active staff before deactivating this branch.",
+          code: "BRANCH_HAS_ACTIVE_STAFF",
+          activeStaff: activeStaff.count,
+        });
+      }
     }
 
     db.prepare(`

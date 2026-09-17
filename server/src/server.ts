@@ -17,6 +17,7 @@ import customerRoutes from "./routes/customerRoutes.js";
 import organizationRoutes from "./routes/organizationRoutes.js";
 import superAdminRoutes from "./routes/superAdminRoutes.js";
 import branchRoutes from "./routes/branchRoutes.js";
+import stockTransferRoutes from "./routes/stockTransferRoutes.js";
 
 const app = express();
 
@@ -65,6 +66,12 @@ app.use(
   authenticateToken,
   authorizeRoles("admin", "manager"),
   branchRoutes
+);
+app.use(
+  "/api/stock-transfers",
+  authenticateToken,
+  authorizeRoles("admin", "manager"),
+  stockTransferRoutes
 );
 app.use("/api/super-admin", superAdminRoutes);
 

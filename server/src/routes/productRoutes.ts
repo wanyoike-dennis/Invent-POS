@@ -5,6 +5,193 @@ import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
+type BranchRow = {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
+};
+
+const getActiveOrganizationBranch = (
+  organizationId: number,
+  branchId: number
+) => {
+  return db.prepare(`
+    SELECT id, name, code, is_active
+    FROM branches
+    WHERE id = ?
+      AND organization_id = ?
+      AND is_active = 1
+    LIMIT 1
+  `).get(branchId, organizationId) as BranchRow | undefined;
+};
+
+const getUserHomeBranch = (
+  userId: number,
+  organizationId: number
+) => {
+  return db.prepare(`
+    SELECT
+      b.id,
+      b.name,
+      b.code,
+      b.is_active
+    FROM users u
+    INNER JOIN branches b
+      ON b.id = u.branch_id
+      AND b.organization_id = u.organization_id
+    WHERE u.id = ?
+      AND u.organization_id = ?
+      AND u.is_active = 1
+      AND b.is_active = 1
+    LIMIT 1
+  `).get(userId, organizationId) as BranchRow | undefined;
+};
+
+const resolveInventoryBranch = (
+  req: AuthRequest,
+  requestedBranchId?: unknown
+) => {
+  const organizationId = req.user!.organizationId;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return {
+      error: {
+        status: 401,
+        message: "Authenticated user not found",
+      },
+    };
+  }
+
+  const homeBranch = getUserHomeBranch(userId, organizationId);
+
+  if (!homeBranch) {
+    return {
+      error: {
+        status: 403,
+        message:
+          "Your account is not assigned to an active branch. Contact your organization Admin.",
+      },
+    };
+  }
+
+  if (
+    requestedBranchId === undefined ||
+    requestedBranchId === null ||
+    requestedBranchId === ""
+  ) {
+    return { branch: homeBranch };
+  }
+
+  if (req.user?.role === "cashier") {
+    return { branch: homeBranch };
+  }
+
+  const branchId = Number(requestedBranchId);
+
+  if (!Number.isInteger(branchId) || branchId <= 0) {
+    return {
+      error: {
+        status: 400,
+        message: "Invalid branch selected",
+      },
+    };
+  }
+
+  const branch = getActiveOrganizationBranch(
+    organizationId,
+    branchId
+  );
+
+  if (!branch) {
+    return {
+      error: {
+        status: 404,
+        message: "Branch not found or inactive",
+      },
+    };
+  }
+
+  return { branch };
+};
+
+
+
+
+// ==========================================================
+// BRANCH INVENTORY
+// Cashiers can view only their assigned branch.
+// Admins and Managers may optionally request another active branch
+// in the same organization with ?branchId=<id>.
+// Products without an allocation are returned with stock = 0.
+// ==========================================================
+
+router.get(
+  "/branch-inventory",
+  (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+    const resolved = resolveInventoryBranch(
+      req,
+      req.query.branchId
+    );
+
+    if ("error" in resolved) {
+      return res.status(resolved.error.status).json({
+        message: resolved.error.message,
+      });
+    }
+
+    const branch = resolved.branch!;
+
+    const isCashier = req.user?.role === "cashier";
+
+    const products = isCashier
+      ? db.prepare(`
+          SELECT
+            p.id,
+            p.name,
+            p.category,
+            p.price,
+            COALESCE(bi.stock, 0) AS stock,
+            p.created_at
+          FROM products p
+          LEFT JOIN branch_inventory bi
+            ON bi.product_id = p.id
+            AND bi.branch_id = ?
+            AND bi.organization_id = p.organization_id
+          WHERE p.organization_id = ?
+          ORDER BY p.id DESC
+        `).all(branch.id, organizationId)
+      : db.prepare(`
+          SELECT
+            p.id,
+            p.name,
+            p.category,
+            p.cost_price,
+            p.price,
+            COALESCE(bi.stock, 0) AS stock,
+            p.stock AS organization_stock_legacy,
+            p.created_at
+          FROM products p
+          LEFT JOIN branch_inventory bi
+            ON bi.product_id = p.id
+            AND bi.branch_id = ?
+            AND bi.organization_id = p.organization_id
+          WHERE p.organization_id = ?
+          ORDER BY p.id DESC
+        `).all(branch.id, organizationId);
+
+    return res.json({
+      branch: {
+        id: branch.id,
+        name: branch.name,
+        code: branch.code,
+      },
+      products,
+    });
+  }
+);
 
 
 router.get("/", (req: AuthRequest, res) => {
@@ -198,17 +385,18 @@ router.delete("/:id", authorizeRoles("admin"), (req: AuthRequest, res) => {
 router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
   const organizationId = req.user!.organizationId;
   const { id } = req.params;
-  const { type, quantity, reason } = req.body;
+  const { type, quantity, reason, branchId } = req.body;
 
   const product = db
     .prepare(`
-      SELECT *
+      SELECT id, name, stock
       FROM products
       WHERE id = ?
         AND organization_id = ?
     `)
     .get(id, organizationId) as {
       id: number;
+      name: string;
       stock: number;
     } | undefined;
 
@@ -218,6 +406,15 @@ router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req: AuthRequest
     });
   }
 
+  const resolved = resolveInventoryBranch(req, branchId);
+
+  if ("error" in resolved) {
+    return res.status(resolved.error.status).json({
+      message: resolved.error.message,
+    });
+  }
+
+  const branch = resolved.branch!;
   const qty = Number(quantity);
 
   if (!Number.isInteger(qty) || qty <= 0) {
@@ -232,70 +429,107 @@ router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req: AuthRequest
     });
   }
 
-  let newStock = product.stock;
+  const branchInventory = db
+    .prepare(`
+      SELECT stock
+      FROM branch_inventory
+      WHERE organization_id = ?
+        AND branch_id = ?
+        AND product_id = ?
+      LIMIT 1
+    `)
+    .get(organizationId, branch.id, product.id) as
+    | { stock: number }
+    | undefined;
 
-  if (type === "in") {
-    newStock += qty;
+  const previousBranchStock = Number(branchInventory?.stock || 0);
+  const previousOrganizationStock = Number(product.stock || 0);
+
+  if (type === "out" && qty > previousBranchStock) {
+    return res.status(400).json({
+      message: `Not enough stock available at ${branch.name}`,
+    });
   }
 
-  if (type === "out") {
-    if (qty > product.stock) {
-      return res.status(400).json({
-        message: "Not enough stock available",
-      });
-    }
+  const branchDelta = type === "in" ? qty : -qty;
+  const organizationDelta = branchDelta;
+  const newBranchStock = previousBranchStock + branchDelta;
+  const newOrganizationStock = previousOrganizationStock + organizationDelta;
 
-    newStock -= qty;
+  if (newOrganizationStock < 0) {
+    return res.status(400).json({
+      message: "Organization stock cannot become negative",
+    });
   }
-
-  const updateStock = db.prepare(`
-    UPDATE products
-    SET stock = ?
-    WHERE id = ?
-      AND organization_id = ?
-  `);
-
-  const addMovement = db.prepare(`
-    INSERT INTO stock_movements (
-      product_id,
-      type,
-      quantity,
-      reason,
-      organization_id
-    )
-    VALUES (?, ?, ?, ?, ?)
-  `);
 
   const transaction = db.transaction(() => {
-    updateStock.run(
-      newStock,
-      id,
+    db.prepare(`
+      INSERT INTO branch_inventory (
+        organization_id,
+        branch_id,
+        product_id,
+        stock
+      )
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(branch_id, product_id)
+      DO UPDATE SET
+        stock = excluded.stock,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(
+      organizationId,
+      branch.id,
+      product.id,
+      newBranchStock
+    );
+
+    db.prepare(`
+      UPDATE products
+      SET stock = ?
+      WHERE id = ?
+        AND organization_id = ?
+    `).run(
+      newOrganizationStock,
+      product.id,
       organizationId
     );
 
-    addMovement.run(
-      id,
+    db.prepare(`
+      INSERT INTO stock_movements (
+        product_id,
+        type,
+        quantity,
+        reason,
+        organization_id,
+        branch_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      product.id,
       type,
       qty,
-      reason?.trim() || null,
-      organizationId
+      reason?.trim() || "Manual stock adjustment",
+      organizationId,
+      branch.id
     );
   });
 
   transaction();
 
-  const updatedProduct = db
-    .prepare(`
-      SELECT *
-      FROM products
-      WHERE id = ?
-        AND organization_id = ?
-    `)
-    .get(id, organizationId);
-
-  res.json(updatedProduct);
+  return res.json({
+    message: "Stock updated successfully",
+    branch: {
+      id: branch.id,
+      name: branch.name,
+      code: branch.code,
+    },
+    product: {
+      id: product.id,
+      name: product.name,
+      stock: newBranchStock,
+      organization_stock_legacy: newOrganizationStock,
+    },
+  });
 });
-
 
 // ==========================================================
 // WHOLESALE PURCHASE / RESTOCK
@@ -316,6 +550,7 @@ router.post(
       supplier_id,
       reference,
       notes,
+      branchId,
     } = req.body;
 
     const qty = Number(quantity);
@@ -373,6 +608,16 @@ router.post(
       }
     }
 
+    const resolved = resolveInventoryBranch(req, branchId);
+
+    if ("error" in resolved) {
+      return res.status(resolved.error.status).json({
+        message: resolved.error.message,
+      });
+    }
+
+    const branch = resolved.branch!;
+
     const product = db
       .prepare(`
         SELECT
@@ -403,6 +648,24 @@ router.post(
 
     const previousStock = Number(product.stock || 0);
     const previousCostPrice = Number(product.cost_price || 0);
+
+    const branchInventory = db
+      .prepare(`
+        SELECT stock
+        FROM branch_inventory
+        WHERE organization_id = ?
+          AND branch_id = ?
+          AND product_id = ?
+        LIMIT 1
+      `)
+      .get(
+        organizationId,
+        branch.id,
+        product.id
+      ) as { stock: number } | undefined;
+
+    const previousBranchStock = Number(branchInventory?.stock || 0);
+    const newBranchStock = previousBranchStock + qty;
 
     // Keep inventory money values at 2 decimal places.
     const roundMoney = (value: number) =>
@@ -446,9 +709,10 @@ router.post(
           notes,
           purchased_by,
           purchase_date,
-          organization_id
+          organization_id,
+          branch_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         product.id,
         qty,
@@ -467,7 +731,8 @@ router.post(
           : null,
         purchasedBy,
         purchase_date,
-        organizationId
+        organizationId,
+        branch.id
       );
 
       db.prepare(`
@@ -483,14 +748,34 @@ router.post(
       );
 
       db.prepare(`
+        INSERT INTO branch_inventory (
+          organization_id,
+          branch_id,
+          product_id,
+          stock
+        )
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(branch_id, product_id)
+        DO UPDATE SET
+          stock = excluded.stock,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(
+        organizationId,
+        branch.id,
+        product.id,
+        newBranchStock
+      );
+
+      db.prepare(`
         INSERT INTO stock_movements (
           product_id,
           type,
           quantity,
           reason,
-          organization_id
+          organization_id,
+          branch_id
         )
-        VALUES (?, 'in', ?, ?, ?)
+        VALUES (?, 'in', ?, ?, ?, ?)
       `).run(
         product.id,
         qty,
@@ -499,7 +784,8 @@ router.post(
             ? ` - ${reference.trim()}`
             : ""
         }`,
-        organizationId
+        organizationId,
+        branch.id
       );
     });
 
@@ -531,6 +817,16 @@ router.post(
         new_cost_price: newCostPrice,
         supplier_id: supplierId,
         purchase_date,
+        branch_id: branch.id,
+        branch_name: branch.name,
+        branch_code: branch.code,
+        previous_branch_stock: previousBranchStock,
+        new_branch_stock: newBranchStock,
+      },
+      branch: {
+        id: branch.id,
+        name: branch.name,
+        code: branch.code,
       },
       product: updatedProduct,
     });
@@ -548,6 +844,18 @@ router.get(
   authorizeRoles("admin", "manager"),
   (req: AuthRequest, res) => {
     const organizationId = req.user!.organizationId;
+    const resolved = resolveInventoryBranch(
+      req,
+      req.query.branchId
+    );
+
+    if ("error" in resolved) {
+      return res.status(resolved.error.status).json({
+        message: resolved.error.message,
+      });
+    }
+
+    const branch = resolved.branch!;
 
     const purchases = db
       .prepare(`
@@ -569,46 +877,94 @@ router.get(
           sp.purchased_by,
           u.name AS purchased_by_name,
           sp.purchase_date,
-          sp.created_at
+          sp.created_at,
+          sp.branch_id,
+          b.name AS branch_name,
+          b.code AS branch_code
         FROM stock_purchases sp
         INNER JOIN products p
           ON p.id = sp.product_id
+          AND p.organization_id = sp.organization_id
         LEFT JOIN users u
           ON u.id = sp.purchased_by
+          AND u.organization_id = sp.organization_id
         LEFT JOIN suppliers s
           ON s.id = sp.supplier_id
+          AND s.organization_id = sp.organization_id
+        LEFT JOIN branches b
+          ON b.id = sp.branch_id
+          AND b.organization_id = sp.organization_id
         WHERE sp.organization_id = ?
+          AND sp.branch_id = ?
         ORDER BY sp.purchase_date DESC, sp.id DESC
       `)
-      .all(organizationId);
+      .all(organizationId, branch.id);
 
-    res.json(purchases);
+    res.json({
+      branch: {
+        id: branch.id,
+        name: branch.name,
+        code: branch.code,
+      },
+      purchases,
+    });
   }
 );
 
 
-router.get("/stock/history", authorizeRoles("admin", "manager"), (req: AuthRequest, res) => {
-  const organizationId = req.user!.organizationId;
+router.get(
+  "/stock/history",
+  authorizeRoles("admin", "manager"),
+  (req: AuthRequest, res) => {
+    const organizationId = req.user!.organizationId;
+    const resolved = resolveInventoryBranch(
+      req,
+      req.query.branchId
+    );
 
-  const movements = db
-    .prepare(`
-      SELECT
-        stock_movements.id,
-        stock_movements.product_id,
-        products.name AS product_name,
-        stock_movements.type,
-        stock_movements.quantity,
-        stock_movements.reason,
-        stock_movements.created_at
-      FROM stock_movements
-      INNER JOIN products
-        ON products.id = stock_movements.product_id
-      WHERE stock_movements.organization_id = ?
-      ORDER BY stock_movements.id DESC
-    `)
-    .all(organizationId);
+    if ("error" in resolved) {
+      return res.status(resolved.error.status).json({
+        message: resolved.error.message,
+      });
+    }
 
-  res.json(movements);
-});
+    const branch = resolved.branch!;
+
+    const movements = db
+      .prepare(`
+        SELECT
+          sm.id,
+          sm.product_id,
+          p.name AS product_name,
+          sm.type,
+          sm.quantity,
+          sm.reason,
+          sm.created_at,
+          sm.branch_id,
+          b.name AS branch_name,
+          b.code AS branch_code
+        FROM stock_movements sm
+        INNER JOIN products p
+          ON p.id = sm.product_id
+          AND p.organization_id = sm.organization_id
+        LEFT JOIN branches b
+          ON b.id = sm.branch_id
+          AND b.organization_id = sm.organization_id
+        WHERE sm.organization_id = ?
+          AND sm.branch_id = ?
+        ORDER BY sm.id DESC
+      `)
+      .all(organizationId, branch.id);
+
+    res.json({
+      branch: {
+        id: branch.id,
+        name: branch.name,
+        code: branch.code,
+      },
+      movements,
+    });
+  }
+);
 
 export default router;

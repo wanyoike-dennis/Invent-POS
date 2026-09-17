@@ -736,6 +736,348 @@ db.exec(`
 `);
 
 // ==========================================================
+// EXPENSE / BRANCH OWNERSHIP
+// Existing historical expenses are assigned to their organization's
+// Main Branch because the original branch cannot be reconstructed.
+// New expenses must receive branch_id from the expense route.
+// ==========================================================
+
+const expenseBranchColumns = db
+  .prepare("PRAGMA table_info(expenses)")
+  .all() as { name: string }[];
+
+if (
+  !expenseBranchColumns.some(
+    (column) => column.name === "branch_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE expenses
+    ADD COLUMN branch_id INTEGER
+      REFERENCES branches(id)
+  `);
+}
+
+// Backfill only rows that do not yet have branch ownership.
+// Main Branch is preferred by code; otherwise the earliest branch is used.
+db.exec(`
+  UPDATE expenses
+  SET branch_id = (
+    SELECT b.id
+    FROM branches b
+    WHERE b.organization_id = expenses.organization_id
+    ORDER BY
+      CASE WHEN UPPER(TRIM(COALESCE(b.code, ''))) = 'MAIN' THEN 0 ELSE 1 END,
+      CASE WHEN b.is_active = 1 THEN 0 ELSE 1 END,
+      b.id ASC
+    LIMIT 1
+  )
+  WHERE branch_id IS NULL
+    AND organization_id IS NOT NULL
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_expenses_branch
+    ON expenses(branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_expenses_organization_branch
+    ON expenses(organization_id, branch_id);
+`);
+
+// ==========================================================
+// BRANCH INVENTORY / PER-BRANCH STOCK FOUNDATION
+// Products remain organization-owned catalog records.
+// Stock quantities are stored per branch in branch_inventory.
+// Existing product stock is migrated to the organization's Main Branch only.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS branch_inventory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    branch_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    stock INTEGER NOT NULL DEFAULT 0
+      CHECK (stock >= 0),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id),
+
+    FOREIGN KEY (branch_id)
+      REFERENCES branches(id),
+
+    FOREIGN KEY (product_id)
+      REFERENCES products(id),
+
+    UNIQUE (branch_id, product_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_branch_inventory_organization
+    ON branch_inventory(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_branch_inventory_branch
+    ON branch_inventory(branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_branch_inventory_product
+    ON branch_inventory(product_id);
+
+  CREATE INDEX IF NOT EXISTS idx_branch_inventory_org_branch
+    ON branch_inventory(organization_id, branch_id);
+`);
+
+// Seed one inventory row for every existing product in its organization's
+// Main Branch. INSERT OR IGNORE makes this safe on every backend restart.
+// Existing products keep their current products.stock quantity in Main Branch.
+db.exec(`
+  INSERT OR IGNORE INTO branch_inventory (
+    organization_id,
+    branch_id,
+    product_id,
+    stock
+  )
+  SELECT
+    p.organization_id,
+    (
+      SELECT b.id
+      FROM branches b
+      WHERE b.organization_id = p.organization_id
+      ORDER BY
+        CASE WHEN UPPER(TRIM(COALESCE(b.code, ''))) = 'MAIN' THEN 0 ELSE 1 END,
+        CASE WHEN b.is_active = 1 THEN 0 ELSE 1 END,
+        b.id ASC
+      LIMIT 1
+    ),
+    p.id,
+    CASE
+      WHEN COALESCE(p.stock, 0) < 0 THEN 0
+      ELSE COALESCE(p.stock, 0)
+    END
+  FROM products p
+  WHERE p.organization_id IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM branches b
+      WHERE b.organization_id = p.organization_id
+    )
+`);
+
+// ==========================================================
+// INVENTORY HISTORY / BRANCH OWNERSHIP
+// Stock movements and wholesale purchases now record the branch
+// whose inventory was affected. Existing historical rows are assigned
+// to the organization's Main Branch because their original branch
+// cannot be reconstructed reliably from the old schema.
+// ==========================================================
+
+const stockMovementBranchColumns = db
+  .prepare("PRAGMA table_info(stock_movements)")
+  .all() as { name: string }[];
+
+if (
+  !stockMovementBranchColumns.some(
+    (column) => column.name === "branch_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE stock_movements
+    ADD COLUMN branch_id INTEGER
+      REFERENCES branches(id)
+  `);
+}
+
+const stockPurchaseBranchColumns = db
+  .prepare("PRAGMA table_info(stock_purchases)")
+  .all() as { name: string }[];
+
+if (
+  !stockPurchaseBranchColumns.some(
+    (column) => column.name === "branch_id"
+  )
+) {
+  db.exec(`
+    ALTER TABLE stock_purchases
+    ADD COLUMN branch_id INTEGER
+      REFERENCES branches(id)
+  `);
+}
+
+// Historical records created before branch-aware inventory did not store
+// branch ownership. Assign those records to the organization's Main Branch.
+// New records will always receive branch_id directly from the route.
+db.exec(`
+  UPDATE stock_movements
+  SET branch_id = (
+    SELECT b.id
+    FROM branches b
+    WHERE b.organization_id = stock_movements.organization_id
+    ORDER BY
+      CASE WHEN UPPER(TRIM(COALESCE(b.code, ''))) = 'MAIN' THEN 0 ELSE 1 END,
+      CASE WHEN b.is_active = 1 THEN 0 ELSE 1 END,
+      b.id ASC
+    LIMIT 1
+  )
+  WHERE branch_id IS NULL
+    AND organization_id IS NOT NULL
+`);
+
+db.exec(`
+  UPDATE stock_purchases
+  SET branch_id = (
+    SELECT b.id
+    FROM branches b
+    WHERE b.organization_id = stock_purchases.organization_id
+    ORDER BY
+      CASE WHEN UPPER(TRIM(COALESCE(b.code, ''))) = 'MAIN' THEN 0 ELSE 1 END,
+      CASE WHEN b.is_active = 1 THEN 0 ELSE 1 END,
+      b.id ASC
+    LIMIT 1
+  )
+  WHERE branch_id IS NULL
+    AND organization_id IS NOT NULL
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_stock_movements_branch
+    ON stock_movements(branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_movements_organization_branch
+    ON stock_movements(organization_id, branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_purchases_branch
+    ON stock_purchases(branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_purchases_organization_branch
+    ON stock_purchases(organization_id, branch_id);
+`);
+
+// ==========================================================
+// STOCK TRANSFERS / INTER-BRANCH INVENTORY MOVEMENT
+// Transfers move existing stock from one branch to another.
+// They do not change the organization's total products.stock quantity.
+// A transfer header stores the audit trail; item rows store product
+// quantities and branch stock snapshots for each transferred product.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS stock_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    transfer_number TEXT NOT NULL,
+    from_branch_id INTEGER NOT NULL,
+    to_branch_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed'
+      CHECK (status IN ('completed')),
+    notes TEXT,
+    transferred_by INTEGER,
+    transferred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id),
+
+    FOREIGN KEY (from_branch_id)
+      REFERENCES branches(id),
+
+    FOREIGN KEY (to_branch_id)
+      REFERENCES branches(id),
+
+    FOREIGN KEY (transferred_by)
+      REFERENCES users(id),
+
+    UNIQUE (organization_id, transfer_number),
+
+    CHECK (from_branch_id <> to_branch_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS stock_transfer_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL
+      CHECK (quantity > 0),
+    from_stock_before INTEGER NOT NULL
+      CHECK (from_stock_before >= 0),
+    from_stock_after INTEGER NOT NULL
+      CHECK (from_stock_after >= 0),
+    to_stock_before INTEGER NOT NULL
+      CHECK (to_stock_before >= 0),
+    to_stock_after INTEGER NOT NULL
+      CHECK (to_stock_after >= 0),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (transfer_id)
+      REFERENCES stock_transfers(id),
+
+    FOREIGN KEY (product_id)
+      REFERENCES products(id),
+
+    UNIQUE (transfer_id, product_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_stock_transfers_organization
+    ON stock_transfers(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_transfers_from_branch
+    ON stock_transfers(organization_id, from_branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_transfers_to_branch
+    ON stock_transfers(organization_id, to_branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_transfers_transferred_at
+    ON stock_transfers(organization_id, transferred_at);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_transfer
+    ON stock_transfer_items(transfer_id);
+
+  CREATE INDEX IF NOT EXISTS idx_stock_transfer_items_product
+    ON stock_transfer_items(product_id);
+`);
+
+// ==========================================================
+// SALES / BRANCH OWNERSHIP
+// Existing sales are assigned to their organization's Main Branch.
+// New sales are assigned by the authenticated user's home branch.
+// ==========================================================
+
+const salesBranchColumns = db
+  .prepare("PRAGMA table_info(sales)")
+  .all() as { name: string }[];
+
+if (!salesBranchColumns.some((column) => column.name === "branch_id")) {
+  db.exec(`
+    ALTER TABLE sales
+    ADD COLUMN branch_id INTEGER
+      REFERENCES branches(id)
+  `);
+}
+
+db.exec(`
+  UPDATE sales
+  SET branch_id = (
+    SELECT b.id
+    FROM branches b
+    WHERE b.organization_id = sales.organization_id
+    ORDER BY
+      CASE WHEN UPPER(TRIM(COALESCE(b.code, ''))) = 'MAIN' THEN 0 ELSE 1 END,
+      CASE WHEN b.is_active = 1 THEN 0 ELSE 1 END,
+      b.id ASC
+    LIMIT 1
+  )
+  WHERE branch_id IS NULL
+    AND organization_id IS NOT NULL
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_sales_branch
+    ON sales(branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_sales_organization_branch
+    ON sales(organization_id, branch_id);
+`);
+
+// ==========================================================
 // COST PRICE / COGS MIGRATIONS
 // Adds the new columns safely to existing databases.
 // Existing records start at 0 until their historical costs

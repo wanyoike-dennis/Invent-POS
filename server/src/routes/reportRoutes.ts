@@ -4,11 +4,137 @@ import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
+type BranchRow = {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
+};
+
+type ReportAccess = {
+  role: string;
+  homeBranch: BranchRow;
+  multiBranchReports: boolean;
+};
+
+function featureIsIncluded(value: string | null | undefined) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    normalized === "included" ||
+    normalized === "true" ||
+    normalized === "1" ||
+    normalized === "yes"
+  );
+}
+
+function getReportAccess(
+  req: AuthRequest,
+  organizationId: number
+): ReportAccess | null {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return null;
+  }
+
+  const user = db
+    .prepare(`
+      SELECT
+        u.role,
+        b.id AS branch_id,
+        b.name AS branch_name,
+        b.code AS branch_code,
+        b.is_active AS branch_is_active
+      FROM users u
+      INNER JOIN branches b
+        ON b.id = u.branch_id
+       AND b.organization_id = u.organization_id
+      WHERE u.id = ?
+        AND u.organization_id = ?
+        AND u.is_active = 1
+      LIMIT 1
+    `)
+    .get(userId, organizationId) as
+    | {
+        role: string;
+        branch_id: number;
+        branch_name: string;
+        branch_code: string | null;
+        branch_is_active: number;
+      }
+    | undefined;
+
+  if (!user) {
+    return null;
+  }
+
+  const entitlement = db
+    .prepare(`
+      SELECT spf.feature_value
+      FROM organizations o
+      INNER JOIN subscription_plans sp
+        ON LOWER(sp.code) = LOWER(o.subscription_plan)
+      INNER JOIN subscription_plan_features spf
+        ON spf.plan_id = sp.id
+      WHERE o.id = ?
+        AND spf.feature_key = 'multi_branch_reports'
+        AND sp.is_active = 1
+      LIMIT 1
+    `)
+    .get(organizationId) as
+    | { feature_value: string | null }
+    | undefined;
+
+  return {
+    role: String(user.role || "").toLowerCase(),
+    homeBranch: {
+      id: user.branch_id,
+      name: user.branch_name,
+      code: user.branch_code,
+      is_active: Number(user.branch_is_active),
+    },
+    multiBranchReports: featureIsIncluded(
+      entitlement?.feature_value
+    ),
+  };
+}
+
+function getOrganizationBranch(
+  organizationId: number,
+  branchId: number
+) {
+  return db
+    .prepare(`
+      SELECT
+        id,
+        name,
+        code,
+        is_active
+      FROM branches
+      WHERE id = ?
+        AND organization_id = ?
+      LIMIT 1
+    `)
+    .get(branchId, organizationId) as BranchRow | undefined;
+}
+
 // ============================================================
 // GET REPORT SUMMARY
-// Supports optional startDate and endDate:
+//
+// Supports:
 // /api/reports
 // /api/reports?startDate=2026-09-01&endDate=2026-09-30
+// /api/reports?branchId=7
+//
+// Branch rules:
+// - Admin/Manager + multi_branch_reports:
+//     no branchId = All Branches
+//     branchId    = selected organization branch
+// - Everyone else:
+//     reports are locked to the user's assigned branch
 // ============================================================
 
 router.get("/", (req: AuthRequest, res) => {
@@ -17,24 +143,95 @@ router.get("/", (req: AuthRequest, res) => {
   try {
     const startDate =
       typeof req.query.startDate === "string"
-        ? req.query.startDate
+        ? req.query.startDate.trim()
         : null;
 
     const endDate =
       typeof req.query.endDate === "string"
-        ? req.query.endDate
+        ? req.query.endDate.trim()
         : null;
 
+    const requestedBranchValue =
+      typeof req.query.branchId === "string"
+        ? req.query.branchId.trim()
+        : "";
+
+    const access = getReportAccess(
+      req,
+      organizationId
+    );
+
+    if (!access) {
+      return res.status(401).json({
+        message:
+          "Your account is not assigned to a valid branch",
+      });
+    }
+
+    const isAdminOrManager =
+      access.role === "admin" ||
+      access.role === "manager";
+
+    const canUseMultiBranchReports =
+      isAdminOrManager &&
+      access.multiBranchReports;
+
+    let effectiveBranch: BranchRow | null = null;
+    let scope: "all_branches" | "branch" = "branch";
+
+    if (canUseMultiBranchReports) {
+      if (requestedBranchValue) {
+        const requestedBranchId = Number(
+          requestedBranchValue
+        );
+
+        if (
+          !Number.isInteger(requestedBranchId) ||
+          requestedBranchId <= 0
+        ) {
+          return res.status(400).json({
+            message: "Invalid branch ID",
+          });
+        }
+
+        const requestedBranch =
+          getOrganizationBranch(
+            organizationId,
+            requestedBranchId
+          );
+
+        if (!requestedBranch) {
+          return res.status(404).json({
+            message: "Branch not found",
+          });
+        }
+
+        effectiveBranch = requestedBranch;
+        scope = "branch";
+      } else {
+        effectiveBranch = null;
+        scope = "all_branches";
+      }
+    } else {
+      // Starter/non-entitled organizations and non-management
+      // roles cannot escape their assigned branch by changing
+      // the query string manually.
+      effectiveBranch = access.homeBranch;
+      scope = "branch";
+    }
+
     // --------------------------------------------------------
-    // DATE CONDITIONS
+    // DATE + BRANCH CONDITIONS
     // --------------------------------------------------------
 
     const saleConditions: string[] = [
       "s.organization_id = ?",
     ];
+
     const returnConditions: string[] = [
       "s.organization_id = ?",
     ];
+
     const expenseConditions: string[] = [
       "e.organization_id = ?",
     ];
@@ -42,12 +239,24 @@ router.get("/", (req: AuthRequest, res) => {
     const saleParams: Array<string | number> = [
       organizationId,
     ];
+
     const returnParams: Array<string | number> = [
       organizationId,
     ];
+
     const expenseParams: Array<string | number> = [
       organizationId,
     ];
+
+    if (effectiveBranch) {
+      saleConditions.push("s.branch_id = ?");
+      returnConditions.push("s.branch_id = ?");
+      expenseConditions.push("e.branch_id = ?");
+
+      saleParams.push(effectiveBranch.id);
+      returnParams.push(effectiveBranch.id);
+      expenseParams.push(effectiveBranch.id);
+    }
 
     if (startDate) {
       saleConditions.push(
@@ -86,19 +295,13 @@ router.get("/", (req: AuthRequest, res) => {
     }
 
     const saleWhere =
-      saleConditions.length > 0
-        ? `WHERE ${saleConditions.join(" AND ")}`
-        : "";
+      `WHERE ${saleConditions.join(" AND ")}`;
 
     const returnWhere =
-      returnConditions.length > 0
-        ? `WHERE ${returnConditions.join(" AND ")}`
-        : "";
+      `WHERE ${returnConditions.join(" AND ")}`;
 
     const expenseWhere =
-      expenseConditions.length > 0
-        ? `WHERE ${expenseConditions.join(" AND ")}`
-        : "";
+      `WHERE ${expenseConditions.join(" AND ")}`;
 
     // --------------------------------------------------------
     // SALES SUMMARY
@@ -107,10 +310,7 @@ router.get("/", (req: AuthRequest, res) => {
     const salesSummary = db
       .prepare(`
         SELECT
-          COALESCE(
-            SUM(s.total),
-            0
-          ) AS gross_sales,
+          COALESCE(SUM(s.total), 0) AS gross_sales,
 
           COUNT(*) AS transactions,
 
@@ -141,7 +341,6 @@ router.get("/", (req: AuthRequest, res) => {
           ) AS mpesa_sales
 
         FROM sales s
-
         ${saleWhere}
       `)
       .get(...saleParams) as {
@@ -153,8 +352,8 @@ router.get("/", (req: AuthRequest, res) => {
 
     // --------------------------------------------------------
     // REFUND SUMMARY
-    // Refunds use their processing date.
-    // Payment method comes from the original sale.
+    // Refunds belong to the original sale branch and use the
+    // refund processing date.
     // --------------------------------------------------------
 
     const refundSummary = db
@@ -204,7 +403,6 @@ router.get("/", (req: AuthRequest, res) => {
           ) AS mpesa_refunds
 
         FROM sales_returns sr
-
         INNER JOIN sales s
           ON s.id = sr.sale_id
 
@@ -219,8 +417,6 @@ router.get("/", (req: AuthRequest, res) => {
 
     // --------------------------------------------------------
     // COGS SUMMARY
-    // Original COGS follows the sale date.
-    // Returned COGS follows the refund processing date.
     // --------------------------------------------------------
 
     const cogsSummary = db
@@ -261,7 +457,6 @@ router.get("/", (req: AuthRequest, res) => {
 
     // --------------------------------------------------------
     // EXPENSE SUMMARY
-    // Expenses use expense_date (the actual business expense date).
     // --------------------------------------------------------
 
     const expenseSummary = db
@@ -275,7 +470,7 @@ router.get("/", (req: AuthRequest, res) => {
             SUM(
               CASE
                 WHEN e.payment_method = 'Cash'
-                THEN e.amount
+                  THEN e.amount
                 ELSE 0
               END
             ),
@@ -286,7 +481,7 @@ router.get("/", (req: AuthRequest, res) => {
             SUM(
               CASE
                 WHEN e.payment_method = 'M-Pesa'
-                THEN e.amount
+                  THEN e.amount
                 ELSE 0
               END
             ),
@@ -294,7 +489,6 @@ router.get("/", (req: AuthRequest, res) => {
           ) AS mpesa_expenses
 
         FROM expenses e
-
         ${expenseWhere}
       `)
       .get(...expenseParams) as {
@@ -384,8 +578,66 @@ router.get("/", (req: AuthRequest, res) => {
 
     // --------------------------------------------------------
     // DAILY REPORT
-    // Combines sales date and refund processing date
+    // The same branch scope is applied to every correlated
+    // sales/refund/COGS/expense calculation.
     // --------------------------------------------------------
+
+    const dailyBranchSaleCondition =
+      effectiveBranch
+        ? "AND s2.branch_id = ?"
+        : "";
+
+    const dailyBranchRefundCondition =
+      effectiveBranch
+        ? "AND rs2.branch_id = ?"
+        : "";
+
+    const dailyBranchCogsCondition =
+      effectiveBranch
+        ? "AND s3.branch_id = ?"
+        : "";
+
+    const dailyBranchReturnedCogsCondition =
+      effectiveBranch
+        ? "AND rs3.branch_id = ?"
+        : "";
+
+    const dailyBranchExpenseCondition =
+      effectiveBranch
+        ? "AND e2.branch_id = ?"
+        : "";
+
+    const dailyTailParams: Array<string | number> = [
+      organizationId,
+    ];
+
+    if (effectiveBranch) {
+      dailyTailParams.push(effectiveBranch.id);
+    }
+
+    dailyTailParams.push(organizationId);
+
+    if (effectiveBranch) {
+      dailyTailParams.push(effectiveBranch.id);
+    }
+
+    dailyTailParams.push(organizationId);
+
+    if (effectiveBranch) {
+      dailyTailParams.push(effectiveBranch.id);
+    }
+
+    dailyTailParams.push(organizationId);
+
+    if (effectiveBranch) {
+      dailyTailParams.push(effectiveBranch.id);
+    }
+
+    dailyTailParams.push(organizationId);
+
+    if (effectiveBranch) {
+      dailyTailParams.push(effectiveBranch.id);
+    }
 
     const dailySales = db
       .prepare(`
@@ -397,9 +649,7 @@ router.get("/", (req: AuthRequest, res) => {
                 DATE(s.created_at, 'localtime')
               )
             ) AS day
-
           FROM sales s
-
           ${saleWhere}
 
           UNION
@@ -409,20 +659,16 @@ router.get("/", (req: AuthRequest, res) => {
               sr.created_at,
               'localtime'
             ) AS day
-
           FROM sales_returns sr
           INNER JOIN sales s
             ON s.id = sr.sale_id
-
           ${returnWhere}
 
           UNION
 
           SELECT
             DATE(e.expense_date) AS day
-
           FROM expenses e
-
           ${expenseWhere}
         )
 
@@ -432,9 +678,7 @@ router.get("/", (req: AuthRequest, res) => {
           COALESCE(
             (
               SELECT SUM(s2.total)
-
               FROM sales s2
-
               WHERE DATE(
                 COALESCE(
                   s2.sale_date,
@@ -442,25 +686,23 @@ router.get("/", (req: AuthRequest, res) => {
                 )
               ) = dates.day
                 AND s2.organization_id = ?
+                ${dailyBranchSaleCondition}
             ),
             0
           ) AS gross_sales,
 
           COALESCE(
             (
-              SELECT SUM(
-                sr2.refund_amount
-              )
-
+              SELECT SUM(sr2.refund_amount)
               FROM sales_returns sr2
               INNER JOIN sales rs2
                 ON rs2.id = sr2.sale_id
-
               WHERE DATE(
                 sr2.created_at,
                 'localtime'
               ) = dates.day
                 AND rs2.organization_id = ?
+                ${dailyBranchRefundCondition}
             ),
             0
           ) AS refunds,
@@ -480,6 +722,7 @@ router.get("/", (req: AuthRequest, res) => {
                 )
               ) = dates.day
                 AND s3.organization_id = ?
+                ${dailyBranchCogsCondition}
             ),
             0
           ) AS original_cogs,
@@ -501,6 +744,7 @@ router.get("/", (req: AuthRequest, res) => {
                 'localtime'
               ) = dates.day
                 AND rs3.organization_id = ?
+                ${dailyBranchReturnedCogsCondition}
             ),
             0
           ) AS returned_cogs,
@@ -508,32 +752,25 @@ router.get("/", (req: AuthRequest, res) => {
           COALESCE(
             (
               SELECT SUM(e2.amount)
-
               FROM expenses e2
-
               WHERE DATE(
                 e2.expense_date
               ) = dates.day
                 AND e2.organization_id = ?
+                ${dailyBranchExpenseCondition}
             ),
             0
           ) AS expenses
 
         FROM dates
-
         WHERE dates.day IS NOT NULL
-
         ORDER BY dates.day ASC
       `)
       .all(
         ...saleParams,
         ...returnParams,
         ...expenseParams,
-        organizationId,
-        organizationId,
-        organizationId,
-        organizationId,
-        organizationId
+        ...dailyTailParams
       )
       .map((row: any) => {
         const gross = Number(
@@ -571,23 +808,14 @@ router.get("/", (req: AuthRequest, res) => {
 
         return {
           date: row.date,
-
           gross_sales: gross,
-
           refunds: refunded,
-
           net_sales: dailyNetSales,
-
           original_cogs: dailyOriginalCogs,
-
           returned_cogs: dailyReturnedCogs,
-
           net_cogs: dailyNetCogs,
-
           gross_profit: dailyGrossProfit,
-
           expenses: dailyExpenses,
-
           net_profit:
             dailyGrossProfit - dailyExpenses,
         };
@@ -601,26 +829,41 @@ router.get("/", (req: AuthRequest, res) => {
       filters: {
         start_date: startDate,
         end_date: endDate,
+        branch_id:
+          effectiveBranch?.id ?? null,
+      },
+
+      scope: {
+        type: scope,
+        multi_branch_reports:
+          canUseMultiBranchReports,
+        branch: effectiveBranch
+          ? {
+              id: effectiveBranch.id,
+              name: effectiveBranch.name,
+              code: effectiveBranch.code,
+              is_active:
+                Boolean(effectiveBranch.is_active),
+            }
+          : null,
+        home_branch: {
+          id: access.homeBranch.id,
+          name: access.homeBranch.name,
+          code: access.homeBranch.code,
+          is_active:
+            Boolean(access.homeBranch.is_active),
+        },
       },
 
       summary: {
-        // Overall
         gross_sales: grossSales,
-
         refunds,
-
         net_sales: netSales,
-
         original_cogs: originalCogs,
-
         returned_cogs: returnedCogs,
-
         net_cogs: netCogs,
-
         gross_profit: grossProfit,
-
         expenses,
-
         net_profit: netProfit,
 
         transactions: Number(
@@ -628,40 +871,22 @@ router.get("/", (req: AuthRequest, res) => {
         ),
 
         return_transactions: Number(
-          refundSummary.return_transactions ||
-            0
+          refundSummary.return_transactions || 0
         ),
 
         expense_transactions: Number(
-          expenseSummary.expense_transactions ||
-            0
+          expenseSummary.expense_transactions || 0
         ),
 
-        // Cash
-        gross_cash_sales:
-          grossCashSales,
+        gross_cash_sales: grossCashSales,
+        cash_refunds: cashRefunds,
+        net_cash_sales: netCashSales,
+        cash_expenses: cashExpenses,
 
-        cash_refunds:
-          cashRefunds,
-
-        net_cash_sales:
-          netCashSales,
-
-        cash_expenses:
-          cashExpenses,
-
-        // M-Pesa
-        gross_mpesa_sales:
-          grossMpesaSales,
-
-        mpesa_refunds:
-          mpesaRefunds,
-
-        net_mpesa_sales:
-          netMpesaSales,
-
-        mpesa_expenses:
-          mpesaExpenses,
+        gross_mpesa_sales: grossMpesaSales,
+        mpesa_refunds: mpesaRefunds,
+        net_mpesa_sales: netMpesaSales,
+        mpesa_expenses: mpesaExpenses,
       },
 
       daily_sales: dailySales,

@@ -978,6 +978,42 @@ router.put(
         Number(targetUser.is_active) === 1;
 
       if (isActive && !isCurrentlyActive) {
+        const assignedBranch = db
+          .prepare(`
+            SELECT
+              b.id,
+              b.name,
+              b.code,
+              b.is_active
+            FROM users u
+            LEFT JOIN branches b
+              ON b.id = u.branch_id
+              AND b.organization_id = u.organization_id
+            WHERE u.id = ?
+              AND u.organization_id = ?
+            LIMIT 1
+          `)
+          .get(userId, organizationId) as
+          | {
+              id: number | null;
+              name: string | null;
+              code: string | null;
+              is_active: number | null;
+            }
+          | undefined;
+
+        if (
+          !assignedBranch ||
+          !assignedBranch.id ||
+          Number(assignedBranch.is_active) !== 1
+        ) {
+          return res.status(409).json({
+            message:
+              "Reassign this staff member to an active branch before reactivating their account.",
+            code: "STAFF_BRANCH_INACTIVE",
+          });
+        }
+
         const limitCheck = enforceOrganizationUserLimit(
           organizationId
         );

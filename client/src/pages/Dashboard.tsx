@@ -11,6 +11,23 @@ import {
 import { apiFetch } from "../services/api";
 
 type DashboardData = {
+  scope: {
+    type: "all_branches" | "branch";
+    multi_branch_reports: boolean;
+    branch: {
+      id: number;
+      name: string;
+      code: string | null;
+      is_active: boolean;
+    } | null;
+    home_branch: {
+      id: number;
+      name: string;
+      code: string | null;
+      is_active: boolean;
+    };
+  };
+
   today: {
     gross_sales: number;
     refunds: number;
@@ -50,7 +67,17 @@ type DashboardData = {
     payment_method: string;
     sold_by_name: string | null;
     created_at: string;
+    branch_id?: number | null;
+    branch_name?: string | null;
+    branch_code?: string | null;
   }[];
+};
+
+type Branch = {
+  id: number;
+  name: string;
+  code: string | null;
+  is_active: number;
 };
 
 function Dashboard() {
@@ -72,20 +99,55 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const fetchDashboard = async () => {
+  const [branches, setBranches] =
+    useState<Branch[]>([]);
+
+  const [selectedBranchId, setSelectedBranchId] =
+    useState("");
+
+  const [branchesLoading, setBranchesLoading] =
+    useState(true);
+
+  const fetchDashboard = async (
+    branchId = selectedBranchId
+  ) => {
     try {
       setLoading(true);
       setError("");
 
-      const response = await apiFetch("/api/dashboard");
+      const params = new URLSearchParams();
 
-      if (!response.ok) {
-        throw new Error("Failed to load dashboard");
+      if (branchId) {
+        params.set("branchId", branchId);
       }
 
-      const data = await response.json();
+      const query = params.toString();
+
+      const response = await apiFetch(
+        `/api/dashboard${query ? `?${query}` : ""}`
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.message || "Failed to load dashboard"
+        );
+      }
+
+      const data = result as DashboardData;
 
       setDashboardData(data);
+
+      if (
+        data.scope.type === "branch" &&
+        data.scope.branch &&
+        !data.scope.multi_branch_reports
+      ) {
+        setSelectedBranchId(
+          String(data.scope.branch.id)
+        );
+      }
     } catch (error) {
       console.error(
         "Error loading dashboard:",
@@ -93,7 +155,9 @@ function Dashboard() {
       );
 
       setError(
-        "Could not load dashboard information."
+        error instanceof Error
+          ? error.message
+          : "Could not load dashboard information."
       );
     } finally {
       setLoading(false);
@@ -101,8 +165,47 @@ function Dashboard() {
   };
 
   useEffect(() => {
-    fetchDashboard();
+    const loadDashboardPage = async () => {
+      try {
+        setBranchesLoading(true);
+
+        const branchResponse =
+          await apiFetch("/api/branches");
+
+        const branchResult =
+          await branchResponse.json();
+
+        if (branchResponse.ok) {
+          const branchList: Branch[] =
+            Array.isArray(branchResult)
+              ? branchResult
+              : Array.isArray(branchResult.branches)
+                ? branchResult.branches
+                : [];
+
+          setBranches(branchList);
+        }
+
+        await fetchDashboard("");
+      } catch (error) {
+        console.error(
+          "Dashboard page load error:",
+          error
+        );
+      } finally {
+        setBranchesLoading(false);
+      }
+    };
+
+    loadDashboardPage();
   }, []);
+
+  const handleBranchChange = async (
+    branchId: string
+  ) => {
+    setSelectedBranchId(branchId);
+    await fetchDashboard(branchId);
+  };
 
   const formatCurrency = (amount: number) => {
     return `KES ${Number(amount || 0).toLocaleString()}`;
@@ -175,13 +278,71 @@ function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Page heading */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800">
-          Dashboard
-        </h1>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">
+            Dashboard
+          </h1>
 
-        <p className="mt-1 text-slate-500">
-          Here's what's happening with your business today.
+          <p className="mt-1 text-slate-500">
+            Here's what's happening with your business today.
+          </p>
+        </div>
+
+        <div className="w-full sm:w-auto sm:min-w-[260px]">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Viewing Branch
+          </label>
+
+          {dashboardData.scope.multi_branch_reports ? (
+            <select
+              value={selectedBranchId}
+              onChange={(event) =>
+                handleBranchChange(event.target.value)
+              }
+              disabled={branchesLoading}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+            >
+              <option value="">All Branches</option>
+
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                  {branch.code ? ` (${branch.code})` : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700">
+              {dashboardData.scope.branch?.name ||
+                dashboardData.scope.home_branch.name}
+              {(dashboardData.scope.branch?.code ||
+                dashboardData.scope.home_branch.code)
+                ? ` (${
+                    dashboardData.scope.branch?.code ||
+                    dashboardData.scope.home_branch.code
+                  })`
+                : ""}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-blue-100 bg-blue-50 px-5 py-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+          Current Dashboard Scope
+        </p>
+
+        <p className="mt-1 font-semibold text-slate-800">
+          {dashboardData.scope.type === "all_branches"
+            ? "All Branches"
+            : dashboardData.scope.branch
+              ? `${dashboardData.scope.branch.name}${
+                  dashboardData.scope.branch.code
+                    ? ` (${dashboardData.scope.branch.code})`
+                    : ""
+                }`
+              : "Assigned Branch"}
         </p>
       </div>
 
@@ -600,6 +761,15 @@ function Dashboard() {
                         •{" "}
                         {sale.sold_by_name ||
                           "Unknown cashier"}
+                        {sale.branch_name && (
+                          <>
+                            {" "}•{" "}
+                            {sale.branch_name}
+                            {sale.branch_code
+                              ? ` (${sale.branch_code})`
+                              : ""}
+                          </>
+                        )}
                       </p>
 
                       {Number(
