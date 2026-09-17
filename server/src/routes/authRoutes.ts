@@ -2,6 +2,7 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import db from "../database/db.js";
+import { tryLogAuditEvent } from "../services/auditService.js";
 import {
   authenticateToken,
   authorizeRoles,
@@ -55,6 +56,81 @@ const getOrganizationUserLimit = (organizationId: number) => {
     userLimit,
   };
 };
+
+type StaffRolesEntitlementRow = {
+  plan_name: string;
+  staff_roles: string | null;
+};
+
+const getOrganizationStaffRoles = (organizationId: number) => {
+  const row = db.prepare(`
+    SELECT
+      sp.name AS plan_name,
+      spf.feature_value AS staff_roles
+    FROM organizations o
+    INNER JOIN subscription_plans sp
+      ON (
+        LOWER(sp.code) = LOWER(TRIM(o.subscription_plan))
+        OR LOWER(sp.name) = LOWER(TRIM(o.subscription_plan))
+      )
+    INNER JOIN subscription_plan_features spf
+      ON spf.plan_id = sp.id
+      AND spf.feature_key = 'staff_roles'
+    WHERE o.id = ?
+      AND o.subscription_plan IS NOT NULL
+      AND TRIM(o.subscription_plan) <> ''
+    LIMIT 1
+  `).get(organizationId) as StaffRolesEntitlementRow | undefined;
+
+  if (!row) return null;
+
+  const level = String(row.staff_roles || "").trim().toLowerCase();
+
+  if (level !== "basic" && level !== "advanced") return null;
+
+  return {
+    planName: row.plan_name,
+    level,
+    allowedRoles:
+      level === "advanced"
+        ? ["admin", "manager", "cashier"]
+        : ["admin", "cashier"],
+  };
+};
+
+const enforceOrganizationStaffRole = (
+  organizationId: number,
+  role: string
+) => {
+  const entitlement = getOrganizationStaffRoles(organizationId);
+
+  if (!entitlement) {
+    return {
+      allowed: false,
+      status: 403,
+      message:
+        "Your organization does not have an active staff-role entitlement. Contact Invent POS support.",
+      code: "STAFF_ROLE_ENTITLEMENT_MISSING",
+    };
+  }
+
+  if (!entitlement.allowedRoles.includes(role)) {
+    return {
+      allowed: false,
+      status: 403,
+      message: `The ${entitlement.planName} plan does not include the Manager role. Upgrade your subscription to use advanced staff roles.`,
+      code: "PLAN_STAFF_ROLE_NOT_INCLUDED",
+    };
+  }
+
+  return {
+    allowed: true,
+    status: 200,
+    message: "",
+    code: "",
+  };
+};
+
 
 const getActiveOrganizationUserCount = (organizationId: number) => {
   const row = db.prepare(`
@@ -503,6 +579,19 @@ router.post(
         });
       }
 
+      const roleCheck = enforceOrganizationStaffRole(
+        organizationId,
+        normalizedRole
+      );
+
+      if (!roleCheck.allowed) {
+        return res.status(roleCheck.status).json({
+          message: roleCheck.message,
+          code: roleCheck.code,
+          feature: "staff_roles",
+        });
+      }
+
       const selectedBranch = getOrganizationBranch(
         organizationId,
         normalizedBranchId
@@ -584,6 +673,23 @@ router.post(
         `)
         .get(result.lastInsertRowid);
 
+      tryLogAuditEvent({
+        organizationId,
+        branchId: normalizedBranchId,
+        userId: req.user!.id,
+        action: "staff.created",
+        entityType: "user",
+        entityId: Number(result.lastInsertRowid),
+        description: `Created staff member ${String(name).trim()} as ${normalizedRole}`,
+        metadata: {
+          staffName: String(name).trim(),
+          email: normalizedEmail,
+          role: normalizedRole,
+          branchId: normalizedBranchId,
+          branchName: selectedBranch.name,
+        },
+      });
+
       return res.status(201).json({
         message: "User created successfully",
         user: createdUser,
@@ -648,6 +754,8 @@ router.get(
         .all(organizationId);
 
       const entitlement = getOrganizationUserLimit(organizationId);
+      const staffRolesEntitlement =
+        getOrganizationStaffRoles(organizationId);
       const activeUsers = getActiveOrganizationUserCount(organizationId);
 
       return res.json({
@@ -668,6 +776,15 @@ router.get(
               remainingUsers: 0,
               overLimit: 0,
               canAddUser: false,
+            },
+        staffRoles: staffRolesEntitlement
+          ? {
+              level: staffRolesEntitlement.level,
+              allowedRoles: staffRolesEntitlement.allowedRoles,
+            }
+          : {
+              level: null,
+              allowedRoles: [],
             },
       });
     } catch (error) {
@@ -728,13 +845,24 @@ router.put(
     try {
       const targetUser = db
         .prepare(`
-          SELECT id, role
+          SELECT
+            id,
+            name,
+            email,
+            role,
+            branch_id
           FROM users
           WHERE id = ?
             AND organization_id = ?
         `)
         .get(userId, organizationId) as
-        | { id: number; role: string }
+        | {
+            id: number;
+            name: string;
+            email: string;
+            role: string;
+            branch_id: number | null;
+          }
         | undefined;
 
       if (!targetUser) {
@@ -749,6 +877,19 @@ router.put(
       ) {
         return res.status(400).json({
           message: "You cannot remove your own Admin role",
+        });
+      }
+
+      const roleCheck = enforceOrganizationStaffRole(
+        organizationId,
+        normalizedRole
+      );
+
+      if (!roleCheck.allowed) {
+        return res.status(roleCheck.status).json({
+          message: roleCheck.message,
+          code: roleCheck.code,
+          feature: "staff_roles",
         });
       }
 
@@ -831,6 +972,50 @@ router.put(
         `)
         .get(userId, organizationId);
 
+      const changedFields: Record<string, { from: unknown; to: unknown }> = {};
+      const normalizedName = String(name).trim();
+
+      if (targetUser.name !== normalizedName) {
+        changedFields.name = { from: targetUser.name, to: normalizedName };
+      }
+
+      if (targetUser.email !== normalizedEmail) {
+        changedFields.email = { from: targetUser.email, to: normalizedEmail };
+      }
+
+      if (targetUser.role !== normalizedRole) {
+        changedFields.role = { from: targetUser.role, to: normalizedRole };
+      }
+
+      if (Number(targetUser.branch_id) !== normalizedBranchId) {
+        changedFields.branchId = {
+          from: targetUser.branch_id,
+          to: normalizedBranchId,
+        };
+      }
+
+      if (Object.keys(changedFields).length > 0) {
+        tryLogAuditEvent({
+          organizationId,
+          branchId: normalizedBranchId,
+          userId: req.user!.id,
+          action:
+            targetUser.role !== normalizedRole
+              ? "staff.role_changed"
+              : Number(targetUser.branch_id) !== normalizedBranchId
+                ? "staff.branch_changed"
+                : "staff.updated",
+          entityType: "user",
+          entityId: userId,
+          description: `Updated staff member ${normalizedName}`,
+          metadata: {
+            staffName: normalizedName,
+            changes: changedFields,
+            branchName: selectedBranch.name,
+          },
+        });
+      }
+
       return res.json({
         message: "User updated successfully",
         user: updatedUser,
@@ -874,12 +1059,21 @@ router.put(
     try {
       const targetUser = db
         .prepare(`
-          SELECT id
+          SELECT
+            id,
+            name,
+            branch_id
           FROM users
           WHERE id = ?
             AND organization_id = ?
         `)
-        .get(userId, organizationId);
+        .get(userId, organizationId) as
+        | {
+            id: number;
+            name: string;
+            branch_id: number | null;
+          }
+        | undefined;
 
       if (!targetUser) {
         return res.status(404).json({
@@ -902,6 +1096,19 @@ router.put(
         userId,
         organizationId
       );
+
+      tryLogAuditEvent({
+        organizationId,
+        branchId: targetUser.branch_id,
+        userId: req.user!.id,
+        action: "staff.password_reset",
+        entityType: "user",
+        entityId: userId,
+        description: `Reset password for staff member ${targetUser.name}`,
+        metadata: {
+          staffName: targetUser.name,
+        },
+      });
 
       return res.json({
         message: "Password reset successfully",
@@ -955,7 +1162,8 @@ router.put(
           SELECT
             id,
             name,
-            is_active
+            is_active,
+            branch_id
           FROM users
           WHERE id = ?
             AND organization_id = ?
@@ -965,6 +1173,7 @@ router.put(
             id: number;
             name: string;
             is_active: number;
+            branch_id: number | null;
           }
         | undefined;
 
@@ -1064,6 +1273,25 @@ router.put(
             AND organization_id = ?
         `)
         .get(userId, organizationId);
+
+      if (isCurrentlyActive !== isActive) {
+        tryLogAuditEvent({
+          organizationId,
+          branchId: targetUser.branch_id,
+          userId: req.user!.id,
+          action: isActive
+            ? "staff.activated"
+            : "staff.deactivated",
+          entityType: "user",
+          entityId: userId,
+          description: `${isActive ? "Reactivated" : "Deactivated"} staff member ${targetUser.name}`,
+          metadata: {
+            staffName: targetUser.name,
+            previousStatus: isCurrentlyActive ? "active" : "inactive",
+            newStatus: isActive ? "active" : "inactive",
+          },
+        });
+      }
 
       return res.json({
         message: isActive

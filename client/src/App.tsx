@@ -11,6 +11,7 @@ import Expenses from "./pages/Expenses";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Branches from "./pages/Branches";
+import AuditAnalytics from "./pages/AuditAnalytics";
 import SuperAdminLogin from "./pages/SuperAdminLogin";
 import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 import SuperAdminBilling from "./pages/SuperAdminBilling";
@@ -86,6 +87,11 @@ function App() {
           <Route
             path="/reports"
             element={<Reports />}
+          />
+
+          <Route
+            path="/audit-analytics"
+            element={<AuditAnalytics />}
           />
 
           <Route

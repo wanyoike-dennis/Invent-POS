@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import { tryLogAuditEvent } from "../services/auditService.js";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/authMiddleware.js";
 
@@ -649,6 +650,32 @@ router.post("/", (req: AuthRequest, res) => {
 
     const sale = createSale();
 
+    tryLogAuditEvent({
+      organizationId,
+      branchId: sale.branchId,
+      userId: authenticatedUserId,
+      action: "sale.completed",
+      entityType: "sale",
+      entityId: sale.id,
+      description: `Completed sale ${sale.receiptNumber}`,
+      metadata: {
+        receiptNumber: sale.receiptNumber,
+        total: sale.total,
+        paymentMethod: sale.paymentMethod,
+        cashAmount: sale.cashAmount,
+        mpesaAmount: sale.mpesaAmount,
+        customerId: sale.customerId,
+        customerName: sale.customer?.name ?? null,
+        branchName: sale.branch.name,
+        saleDate: sale.saleDate,
+        isBackdated: false,
+        items: items.map((item) => ({
+          productId: Number(item.productId),
+          quantity: Number(item.quantity),
+        })),
+      },
+    });
+
     res.status(201).json({
       message: "Sale completed successfully",
       sale,
@@ -1043,6 +1070,32 @@ router.post(
       });
 
       const sale = createPastSale();
+
+      tryLogAuditEvent({
+        organizationId,
+        branchId: sale.branchId,
+        userId: authenticatedUserId,
+        action: "sale.backdated_created",
+        entityType: "sale",
+        entityId: sale.id,
+        description: `Recorded backdated sale ${sale.receiptNumber} for ${sale.saleDate}`,
+        metadata: {
+          receiptNumber: sale.receiptNumber,
+          total: sale.total,
+          paymentMethod: sale.paymentMethod,
+          cashAmount: sale.cashAmount,
+          mpesaAmount: sale.mpesaAmount,
+          customerId: sale.customerId,
+          customerName: sale.customer?.name ?? null,
+          branchName: sale.branch.name,
+          saleDate: sale.saleDate,
+          isBackdated: true,
+          items: items.map((item) => ({
+            productId: Number(item.productId),
+            quantity: Number(item.quantity),
+          })),
+        },
+      });
 
       return res.status(201).json({
         message: "Past sale recorded successfully",
@@ -1859,6 +1912,32 @@ router.post(
 
       const saleReturn =
         processReturn();
+
+      tryLogAuditEvent({
+        organizationId,
+        branchId: originalSaleBranch.id,
+        userId: returnedBy,
+        action: "sale.return_processed",
+        entityType: "sales_return",
+        entityId: saleReturn.id,
+        description: `Processed return for sale ${sale.receipt_number}`,
+        metadata: {
+          saleId,
+          receiptNumber: sale.receipt_number,
+          refundAmount: saleReturn.refundAmount,
+          reason: saleReturn.reason,
+          originalSaleBranchId: originalSaleBranch.id,
+          originalSaleBranchName: originalSaleBranch.name,
+          items: saleReturn.items.map((item) => ({
+            saleItemId: item.saleItemId,
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            subtotal: item.subtotal,
+          })),
+        },
+      });
 
 
       // --------------------------------------------------------

@@ -18,6 +18,7 @@ import organizationRoutes from "./routes/organizationRoutes.js";
 import superAdminRoutes from "./routes/superAdminRoutes.js";
 import branchRoutes from "./routes/branchRoutes.js";
 import stockTransferRoutes from "./routes/stockTransferRoutes.js";
+import auditRoutes from "./routes/auditRoutes.js";
 
 const app = express();
 
@@ -73,6 +74,13 @@ app.use(
   authorizeRoles("admin", "manager"),
   stockTransferRoutes
 );
+app.use(
+  "/api/audit",
+  authenticateToken,
+  authorizeRoles("admin", "manager"),
+  auditRoutes
+);
+
 app.use("/api/super-admin", superAdminRoutes);
 
 const PORT = process.env.PORT || 5000;

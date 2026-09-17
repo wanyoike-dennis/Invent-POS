@@ -1547,6 +1547,142 @@ db.prepare(`
 `).run();
 
 
+// ==========================================================
+// AUDIT LOG / ADVANCED ANALYTICS FOUNDATION
+// Immutable organization-scoped event history for security and
+// operational auditing. Route-level logging will be added next.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    branch_id INTEGER,
+    user_id INTEGER,
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    description TEXT,
+    metadata TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id),
+
+    FOREIGN KEY (branch_id)
+      REFERENCES branches(id),
+
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_organization
+    ON audit_logs(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_organization_created
+    ON audit_logs(organization_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_organization_branch
+    ON audit_logs(organization_id, branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_organization_user
+    ON audit_logs(organization_id, user_id);
+
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_organization_action
+    ON audit_logs(organization_id, action);
+
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_entity
+    ON audit_logs(organization_id, entity_type, entity_id);
+`);
+
+
+// ==========================================================
+// SUPPORT TICKETS / CUSTOMER SUPPORT FOUNDATION
+// Organization-scoped support requests. The support_level snapshot
+// preserves the tenant's entitlement at the time the ticket is opened.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS support_tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    branch_id INTEGER,
+    created_by INTEGER NOT NULL,
+    ticket_number TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'general',
+    priority TEXT NOT NULL DEFAULT 'normal'
+      CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+    status TEXT NOT NULL DEFAULT 'open'
+      CHECK (status IN ('open', 'in_progress', 'waiting_customer', 'resolved', 'closed')),
+    support_level TEXT NOT NULL DEFAULT 'Standard',
+    assigned_to INTEGER,
+    resolved_at DATETIME,
+    closed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id),
+
+    FOREIGN KEY (branch_id)
+      REFERENCES branches(id),
+
+    FOREIGN KEY (created_by)
+      REFERENCES users(id),
+
+    UNIQUE (organization_id, ticket_number)
+  );
+
+  CREATE TABLE IF NOT EXISTS support_ticket_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL,
+    organization_id INTEGER NOT NULL,
+    user_id INTEGER,
+    sender_type TEXT NOT NULL
+      CHECK (sender_type IN ('tenant', 'support')),
+    message TEXT NOT NULL,
+    is_internal INTEGER NOT NULL DEFAULT 0
+      CHECK (is_internal IN (0, 1)),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (ticket_id)
+      REFERENCES support_tickets(id),
+
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id),
+
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_support_tickets_organization
+    ON support_tickets(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_support_tickets_org_status
+    ON support_tickets(organization_id, status);
+
+  CREATE INDEX IF NOT EXISTS idx_support_tickets_org_branch
+    ON support_tickets(organization_id, branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_support_tickets_created_by
+    ON support_tickets(organization_id, created_by);
+
+  CREATE INDEX IF NOT EXISTS idx_support_tickets_created_at
+    ON support_tickets(organization_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_support_tickets_support_level
+    ON support_tickets(support_level);
+
+  CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket
+    ON support_ticket_messages(ticket_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_organization
+    ON support_ticket_messages(organization_id);
+`);
+
+
 const insertCategory = db.prepare(`
   INSERT OR IGNORE INTO categories (name)
   VALUES (?)

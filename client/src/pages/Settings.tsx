@@ -88,6 +88,13 @@ type StaffSubscription = {
   canAddUser: boolean;
 };
 
+type StaffRole = StaffForm["role"];
+
+type StaffRolesEntitlement = {
+  value: string | null;
+  allowedRoles: StaffRole[];
+};
+
 const emptyStaffForm: StaffForm = {
   name: "",
   email: "",
@@ -126,6 +133,8 @@ function Settings() {
   const [staff, setStaff] = useState<StaffUser[]>([]);
   const [staffSubscription, setStaffSubscription] =
     useState<StaffSubscription | null>(null);
+  const [staffRoles, setStaffRoles] =
+    useState<StaffRolesEntitlement | null>(null);
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffBusy, setStaffBusy] = useState(false);
   const [staffError, setStaffError] = useState("");
@@ -203,12 +212,14 @@ function Settings() {
         );
       }
 
-      // New API shape: { users, subscription }.
+      // Current API shape:
+      // { users, subscription, staffRoles: { value, allowedRoles } }
       // The Array fallback keeps this page compatible with an older backend
       // during development/restarts.
       if (Array.isArray(data)) {
         setStaff(data);
         setStaffSubscription(null);
+        setStaffRoles(null);
       } else {
         setStaff(Array.isArray(data.users) ? data.users : []);
         setStaffSubscription(
@@ -229,6 +240,29 @@ function Settings() {
               }
             : null
         );
+
+        const rawAllowedRoles = Array.isArray(data.staffRoles?.allowedRoles)
+          ? data.staffRoles.allowedRoles
+          : [];
+
+        const allowedRoles = rawAllowedRoles
+          .map((role: unknown) => String(role).toLowerCase())
+          .filter(
+            (role: string): role is StaffRole =>
+              role === "admin" || role === "manager" || role === "cashier"
+          );
+
+        setStaffRoles({
+          value:
+            data.staffRoles?.value === null ||
+            data.staffRoles?.value === undefined
+              ? null
+              : String(data.staffRoles.value),
+          allowedRoles:
+            allowedRoles.length > 0
+              ? allowedRoles
+              : ["admin", "manager", "cashier"],
+        });
       }
     } catch (error) {
       setStaffError(
@@ -405,6 +439,22 @@ function Settings() {
     }
   };
 
+  const allowedStaffRoles: StaffRole[] =
+    staffRoles?.allowedRoles && staffRoles.allowedRoles.length > 0
+      ? staffRoles.allowedRoles
+      : ["admin", "manager", "cashier"];
+
+  const roleLabel = (role: StaffRole) => {
+    if (role === "admin") return "Admin";
+    if (role === "manager") return "Manager";
+    return "Cashier";
+  };
+
+  const getDefaultStaffRole = (): StaffRole => {
+    if (allowedStaffRoles.includes("cashier")) return "cashier";
+    return allowedStaffRoles[0] || "cashier";
+  };
+
   const openAddStaff = () => {
     setStaffError("");
     setStaffMessage("");
@@ -424,6 +474,7 @@ function Settings() {
     setEditingStaff(null);
     setStaffForm({
       ...emptyStaffForm,
+      role: getDefaultStaffRole(),
       branchId: branches.length > 0 ? String(branches[0].id) : "",
     });
     setShowAddStaff(true);
@@ -438,7 +489,9 @@ function Settings() {
       name: user.name,
       email: user.email,
       password: "",
-      role: user.role,
+      role: allowedStaffRoles.includes(user.role)
+        ? user.role
+        : getDefaultStaffRole(),
       branchId: user.branch_id ? String(user.branch_id) : "",
     });
   };
@@ -472,6 +525,13 @@ function Settings() {
     if (!editingStaff && staffForm.password.length < 6) {
       setStaffError(
         "Password must be at least 6 characters."
+      );
+      return;
+    }
+
+    if (!allowedStaffRoles.includes(staffForm.role)) {
+      setStaffError(
+        `${roleLabel(staffForm.role)} is not included in your current subscription plan.`
       );
       return;
     }
@@ -1280,10 +1340,18 @@ function Settings() {
                         }
                         className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-[#246BFD] focus:ring-2 focus:ring-[#246BFD]/15"
                       >
-                        <option value="cashier">Cashier</option>
-                        <option value="manager">Manager</option>
-                        <option value="admin">Admin</option>
+                        {allowedStaffRoles.map((role) => (
+                          <option key={role} value={role}>
+                            {roleLabel(role)}
+                          </option>
+                        ))}
                       </select>
+                      {staffRoles && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Available on your current plan:{" "}
+                          {allowedStaffRoles.map(roleLabel).join(", ")}.
+                        </p>
+                      )}
                     </div>
 
                     <div>

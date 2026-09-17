@@ -1,5 +1,6 @@
 import { Router } from "express";
 import db from "../database/db.js";
+import { tryLogAuditEvent } from "../services/auditService.js";
 import {
   authorizeRoles,
   type AuthRequest,
@@ -582,6 +583,43 @@ router.post(
       });
 
       const result = createTransfer();
+
+      tryLogAuditEvent({
+        organizationId,
+        branchId: fromBranch.id,
+        userId: transferredBy,
+        action: "inventory.stock_transferred",
+        entityType: "stock_transfer",
+        entityId: result.transferId,
+        description: `Transferred stock from ${fromBranch.name} to ${toBranch.name}`,
+        metadata: {
+          transferNumber: result.transferNumber,
+          fromBranch: {
+            id: fromBranch.id,
+            name: fromBranch.name,
+            code: fromBranch.code,
+          },
+          toBranch: {
+            id: toBranch.id,
+            name: toBranch.name,
+            code: toBranch.code,
+          },
+          notes,
+          totalUnits: result.items.reduce(
+            (sum, item) => sum + item.quantity,
+            0
+          ),
+          items: result.items.map((item) => ({
+            productId: item.productId,
+            productName: item.product.name,
+            quantity: item.quantity,
+            fromStockBefore: item.fromStockBefore,
+            fromStockAfter: item.fromStockAfter,
+            toStockBefore: item.toStockBefore,
+            toStockAfter: item.toStockAfter,
+          })),
+        },
+      });
 
       const organizationStock = result.items.map((item) => {
         const aggregate = db

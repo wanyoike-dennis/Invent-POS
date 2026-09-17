@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import { tryLogAuditEvent } from "../services/auditService.js";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -238,6 +239,24 @@ router.post("/", (req: AuthRequest, res) => {
       `)
       .get(result.lastInsertRowid, organizationId) as BranchRow;
 
+    tryLogAuditEvent({
+      organizationId,
+      branchId: branch.id,
+      userId: req.user?.id ?? null,
+      action: "branch.created",
+      entityType: "branch",
+      entityId: branch.id,
+      description: `Created branch ${branch.name}`,
+      metadata: {
+        name: branch.name,
+        code: branch.code,
+        phone: branch.phone,
+        email: branch.email,
+        address: branch.address,
+        isActive: branch.is_active === 1,
+      },
+    });
+
     return res.status(201).json({
       message: "Branch created successfully",
       branch,
@@ -356,6 +375,62 @@ router.put("/:id", (req: AuthRequest, res) => {
       `)
       .get(branchId, organizationId) as BranchRow;
 
+    const changedFields: Record<
+      string,
+      { from: unknown; to: unknown }
+    > = {};
+
+    if (existing.name !== branch.name) {
+      changedFields.name = {
+        from: existing.name,
+        to: branch.name,
+      };
+    }
+
+    if (existing.code !== branch.code) {
+      changedFields.code = {
+        from: existing.code,
+        to: branch.code,
+      };
+    }
+
+    if (existing.phone !== branch.phone) {
+      changedFields.phone = {
+        from: existing.phone,
+        to: branch.phone,
+      };
+    }
+
+    if (existing.email !== branch.email) {
+      changedFields.email = {
+        from: existing.email,
+        to: branch.email,
+      };
+    }
+
+    if (existing.address !== branch.address) {
+      changedFields.address = {
+        from: existing.address,
+        to: branch.address,
+      };
+    }
+
+    if (Object.keys(changedFields).length > 0) {
+      tryLogAuditEvent({
+        organizationId,
+        branchId: branch.id,
+        userId: req.user?.id ?? null,
+        action: "branch.updated",
+        entityType: "branch",
+        entityId: branch.id,
+        description: `Updated branch ${branch.name}`,
+        metadata: {
+          branchName: branch.name,
+          changes: changedFields,
+        },
+      });
+    }
+
     return res.json({
       message: "Branch updated successfully",
       branch,
@@ -466,6 +541,29 @@ router.patch("/:id/status", (req: AuthRequest, res) => {
 
     const limit = getBranchLimit(organizationId);
     const activeBranches = getActiveBranchCount(organizationId);
+
+    const wasActive = existing.is_active === 1;
+    const isNowActive = branch.is_active === 1;
+
+    if (wasActive !== isNowActive) {
+      tryLogAuditEvent({
+        organizationId,
+        branchId: branch.id,
+        userId: req.user?.id ?? null,
+        action: isNowActive
+          ? "branch.activated"
+          : "branch.deactivated",
+        entityType: "branch",
+        entityId: branch.id,
+        description: `${isNowActive ? "Reactivated" : "Deactivated"} branch ${branch.name}`,
+        metadata: {
+          branchName: branch.name,
+          branchCode: branch.code,
+          previousStatus: wasActive ? "active" : "inactive",
+          newStatus: isNowActive ? "active" : "inactive",
+        },
+      });
+    }
 
     return res.json({
       message: requestedActive

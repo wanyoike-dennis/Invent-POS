@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import { tryLogAuditEvent } from "../services/auditService.js";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -351,6 +352,25 @@ router.post("/", (req: AuthRequest, res) => {
         result.lastInsertRowid,
         organizationId
       );
+
+    tryLogAuditEvent({
+      organizationId,
+      branchId: expenseBranch.id,
+      userId: req.user.id,
+      action: "expense.created",
+      entityType: "expense",
+      entityId: Number(result.lastInsertRowid),
+      description: `Recorded expense ${title.trim()} for ${expenseBranch.name}`,
+      metadata: {
+        title: title.trim(),
+        category: category.trim(),
+        amount: parsedAmount,
+        paymentMethod,
+        expenseDate,
+        branchId: expenseBranch.id,
+        branchName: expenseBranch.name,
+      },
+    });
 
     return res.status(201).json({
       message: "Expense recorded successfully",
@@ -822,6 +842,68 @@ router.put("/:id", (req: AuthRequest, res) => {
         organizationId
       );
 
+    const previous = existingExpense as any;
+    const current = updatedExpense as any;
+
+    const changes: Record<
+      string,
+      { from: unknown; to: unknown }
+    > = {};
+
+    const trackChange = (
+      key: string,
+      from: unknown,
+      to: unknown
+    ) => {
+      if (String(from ?? "") !== String(to ?? "")) {
+        changes[key] = { from, to };
+      }
+    };
+
+    trackChange("title", previous.title, current?.title);
+    trackChange("category", previous.category, current?.category);
+    trackChange("amount", Number(previous.amount), Number(current?.amount));
+    trackChange(
+      "paymentMethod",
+      previous.payment_method,
+      current?.payment_method
+    );
+    trackChange(
+      "description",
+      previous.description,
+      current?.description
+    );
+    trackChange(
+      "expenseDate",
+      previous.expense_date,
+      current?.expense_date
+    );
+    trackChange(
+      "branchId",
+      previous.branch_id,
+      current?.branch_id
+    );
+
+    if (Object.keys(changes).length > 0) {
+      tryLogAuditEvent({
+        organizationId,
+        branchId: Number(current?.branch_id || targetBranchId),
+        userId: req.user?.id ?? null,
+        action: "expense.updated",
+        entityType: "expense",
+        entityId: expenseId,
+        description: `Updated expense ${String(current?.title || title.trim())}`,
+        metadata: {
+          title: current?.title ?? title.trim(),
+          category: current?.category ?? category.trim(),
+          amount: Number(current?.amount ?? parsedAmount),
+          branchId: Number(current?.branch_id || targetBranchId),
+          branchName: current?.branch_name ?? null,
+          changes,
+        },
+      });
+    }
+
     return res.json({
       message:
         "Expense updated successfully",
@@ -887,6 +969,31 @@ router.delete("/:id", (req: AuthRequest, res) => {
       expenseId,
       organizationId
     );
+
+    const deletedExpense = expense as any;
+
+    tryLogAuditEvent({
+      organizationId,
+      branchId:
+        deletedExpense.branch_id === null ||
+        deletedExpense.branch_id === undefined
+          ? null
+          : Number(deletedExpense.branch_id),
+      userId: req.user?.id ?? null,
+      action: "expense.deleted",
+      entityType: "expense",
+      entityId: expenseId,
+      description: `Deleted expense ${String(deletedExpense.title || expenseId)}`,
+      metadata: {
+        title: deletedExpense.title ?? null,
+        category: deletedExpense.category ?? null,
+        amount: Number(deletedExpense.amount || 0),
+        paymentMethod: deletedExpense.payment_method ?? null,
+        description: deletedExpense.description ?? null,
+        expenseDate: deletedExpense.expense_date ?? null,
+        branchId: deletedExpense.branch_id ?? null,
+      },
+    });
 
     return res.json({
       message:

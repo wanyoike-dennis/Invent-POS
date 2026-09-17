@@ -16,6 +16,7 @@ import {
   Truck,
   Wallet,
   BarChart3,
+  ShieldCheck,
   Settings,
   LogOut,
   Menu,
@@ -211,6 +212,13 @@ const handleLogout = () => {
       icon: BarChart3,
       roles: ["admin", "manager"],
     },
+    {
+      name: "Audit & Analytics",
+      path: "/audit-analytics",
+      icon: ShieldCheck,
+      roles: ["admin", "manager"],
+      entitlement: "audit_analytics",
+    },
   ];
 
   const systemNavigation = [
@@ -299,6 +307,30 @@ const handleLogout = () => {
         />
       )}
 
+      <style>{`
+        .invent-sidebar-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(148, 163, 184, 0.32) transparent;
+        }
+
+        .invent-sidebar-scrollbar::-webkit-scrollbar {
+          width: 5px;
+        }
+
+        .invent-sidebar-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+
+        .invent-sidebar-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.28);
+          border-radius: 9999px;
+        }
+
+        .invent-sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(148, 163, 184, 0.5);
+        }
+      `}</style>
+
       {/* Sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-[#071827] text-white transition-transform duration-300 lg:translate-x-0 ${
@@ -333,7 +365,7 @@ const handleLogout = () => {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-4 py-6">
+        <nav className="invent-sidebar-scrollbar flex-1 overflow-y-auto px-4 py-6">
 
           {renderNavigation(
             "Main",

@@ -18,12 +18,14 @@ const routeRoles: Record<string, string[]> = {
   "/expenses": ["admin", "manager"],
   "/branches": ["admin", "manager"],
   "/reports": ["admin", "manager"],
+  "/audit-analytics": ["admin", "manager"],
   "/settings": ["admin"],
 };
 
 const routeEntitlements: Record<string, string> = {
   "/customers": "customer_expense_tracking",
   "/expenses": "customer_expense_tracking",
+  "/audit-analytics": "audit_analytics",
 };
 
 type EntitlementValue =

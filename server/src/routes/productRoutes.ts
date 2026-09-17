@@ -1,5 +1,6 @@
 import express from "express";
 import db from "../database/db.js";
+import { tryLogAuditEvent } from "../services/auditService.js";
 import { authorizeRoles } from "../middleware/authMiddleware.js";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 
@@ -515,6 +516,29 @@ router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req: AuthRequest
 
   transaction();
 
+  tryLogAuditEvent({
+    organizationId,
+    branchId: branch.id,
+    userId: req.user?.id ?? null,
+    action: "inventory.stock_adjusted",
+    entityType: "product",
+    entityId: product.id,
+    description: `${type === "in" ? "Added" : "Removed"} ${qty} unit(s) of ${product.name} at ${branch.name}`,
+    metadata: {
+      productId: product.id,
+      productName: product.name,
+      adjustmentType: type,
+      quantity: qty,
+      reason: reason?.trim() || "Manual stock adjustment",
+      branchId: branch.id,
+      branchName: branch.name,
+      previousBranchStock,
+      newBranchStock,
+      previousOrganizationStock,
+      newOrganizationStock,
+    },
+  });
+
   return res.json({
     message: "Stock updated successfully",
     branch: {
@@ -790,6 +814,37 @@ router.post(
     });
 
     transaction();
+
+    tryLogAuditEvent({
+      organizationId,
+      branchId: branch.id,
+      userId: purchasedBy,
+      action: "inventory.purchase_recorded",
+      entityType: "product",
+      entityId: product.id,
+      description: `Recorded purchase of ${qty} unit(s) of ${product.name} for ${branch.name}`,
+      metadata: {
+        productId: product.id,
+        productName: product.name,
+        quantity: qty,
+        totalCost,
+        unitCost,
+        previousStock,
+        newStock,
+        previousCostPrice,
+        newCostPrice,
+        supplierId,
+        reference:
+          typeof reference === "string" && reference.trim()
+            ? reference.trim()
+            : null,
+        purchaseDate: purchase_date,
+        branchId: branch.id,
+        branchName: branch.name,
+        previousBranchStock,
+        newBranchStock,
+      },
+    });
 
     const updatedProduct = db
       .prepare(`
