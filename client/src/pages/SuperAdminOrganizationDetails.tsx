@@ -27,6 +27,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { superAdminFetch } from "../services/api";
+import { formatDate, getKenyaDateInputValue } from "../utils/dateTime";
 import { getSubscriptionPrice, type BillingCycle, type SubscriptionPlan } from "../config/subscriptionPricing";
 
 type OrganizationStatus =
@@ -130,48 +131,9 @@ function SuperAdminOrganizationDetails() {
       paymentReference: "",
       allowPriceOverride: false,
       priceOverrideReason: "",
-      periodStart: new Date()
-        .toISOString()
-        .slice(0, 10),
+      periodStart: getKenyaDateInputValue(),
       periodEnd: "",
     });
-
-  const formatDate = (
-    value?: string | null
-  ) => {
-    if (!value) return "—";
-
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-      return "—";
-    }
-
-    return date.toLocaleDateString(
-      "en-KE",
-      {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }
-    );
-  };
-
-  const toDateInput = (
-    value?: string | null
-  ) => {
-    if (!value) return "";
-
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-      return "";
-    }
-
-    return date
-      .toISOString()
-      .slice(0, 10);
-  };
 
   const formatPaymentMethod = (
     value?: string | null
@@ -238,9 +200,7 @@ function SuperAdminOrganizationDetails() {
   const openBilling = () => {
     if (!organization) return;
 
-    const periodStart = new Date()
-      .toISOString()
-      .slice(0, 10);
+    const periodStart = getKenyaDateInputValue();
 
     const billingCycle =
       organization.billing_cycle ||
@@ -434,12 +394,12 @@ function SuperAdminOrganizationDetails() {
             "active"
         );
         setTrialEndsAt(
-          toDateInput(
+          getKenyaDateInputValue(
             organizationData.trial_ends_at
           )
         );
         setSubscriptionExpiresAt(
-          toDateInput(
+          getKenyaDateInputValue(
             organizationData.subscription_expires_at
           )
         );
@@ -498,12 +458,12 @@ function SuperAdminOrganizationDetails() {
       // invalid lifecycle transition is rejected.
       setStatus(organization.status);
       setTrialEndsAt(
-        toDateInput(
+        getKenyaDateInputValue(
           organization.trial_ends_at
         )
       );
       setSubscriptionExpiresAt(
-        toDateInput(
+        getKenyaDateInputValue(
           organization.subscription_expires_at
         )
       );
@@ -533,7 +493,7 @@ function SuperAdminOrganizationDetails() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F7FB]">
+      <div className="flex min-h-[55vh] items-center justify-center">
         <div className="text-center">
           <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
           <p className="mt-4 text-sm text-slate-500">
@@ -546,7 +506,7 @@ function SuperAdminOrganizationDetails() {
 
   if (!organization) {
     return (
-      <div className="min-h-screen bg-[#F5F7FB] p-6">
+      <div className="p-6">
         <div className="mx-auto max-w-3xl rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
           {error ||
             "Organization not found."}
@@ -556,83 +516,83 @@ function SuperAdminOrganizationDetails() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F7FB]">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1500px] items-center justify-between px-5 py-4 lg:px-8">
-          <button
-            onClick={() =>
-              navigate(
-                "/super-admin/dashboard"
-              )
-            }
-            className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
-          >
-            <ArrowLeft size={17} />
-            Dashboard
-          </button>
-
-          <button
-            onClick={loadData}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            <RefreshCw size={16} />
-            Refresh
-          </button>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-[1500px] px-5 py-8 lg:px-8">
+    <>
+      <main className="px-5 py-7 lg:px-8 lg:py-8 xl:px-10">
         {error && (
           <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
             {error}
           </div>
         )}
 
-        <section className="mb-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0B1F33] text-white">
-                <Building2 size={22} />
+        <div className="mb-7">
+          <button
+            type="button"
+            onClick={() => navigate("/super-admin/organizations")}
+            className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-blue-600"
+          >
+            <ArrowLeft size={16} />
+            Back to Organizations
+          </button>
+
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-blue-600" />
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
+                  Organization Profile
+                </p>
               </div>
 
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-blue-600">
-                  Organization Account
-                </p>
-                <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                  <h1 className="text-2xl font-bold tracking-tight text-[#0B1F33]">
-                    {organization.name}
-                  </h1>
-                  <span
-                    className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold capitalize ${
-                      statusStyle[
-                        organization.status
-                      ]
-                    }`}
-                  >
-                    {organization.status}
-                  </span>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0B1F33] text-white">
+                  <Building2 size={22} />
                 </div>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {organization.email ||
-                    organization.slug}
-                </p>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="text-3xl font-bold tracking-tight text-[#0B1F33] lg:text-[34px]">
+                      {organization.name}
+                    </h1>
+                    <span
+                      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold capitalize ${
+                        statusStyle[organization.status]
+                      }`}
+                    >
+                      {organization.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {organization.email || organization.slug}
+                  </p>
+                </div>
               </div>
+
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
+                Review tenant account information, subscription access, platform
+                users and billing history.
+              </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={loadData}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
+              >
+                <RefreshCw size={16} />
+                Refresh
+              </button>
+
               <button
                 type="button"
                 onClick={openBilling}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
               >
                 <WalletCards size={16} />
                 Record Payment
               </button>
-
             </div>
           </div>
-        </section>
+        </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1469,7 +1429,7 @@ function SuperAdminOrganizationDetails() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

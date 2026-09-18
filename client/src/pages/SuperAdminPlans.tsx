@@ -1,14 +1,11 @@
 import {
-  ArrowLeft,
   CalendarRange,
   CheckCircle2,
   CreditCard,
   Edit3,
-  LogOut,
   PackageCheck,
   RefreshCw,
   Save,
-  ShieldCheck,
   X,
 } from "lucide-react";
 import {
@@ -540,107 +537,50 @@ function SuperAdminPlans() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F7FB]">
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-5 py-4 lg:px-8">
-          <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0B1F33] text-white shadow-sm">
-              <ShieldCheck
-                size={23}
-              />
-            </div>
+    <div className="px-5 py-7 lg:px-8 lg:py-8 xl:px-10">
 
-            <div>
-              <p className="text-base font-bold text-[#0B1F33]">
-                Invent POS
-              </p>
-              <p className="text-xs font-medium text-slate-500">
-                Platform Administration
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                loadPlans(true)
-              }
-              disabled={refreshing}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw
-                size={16}
-                className={
-                  refreshing
-                    ? "animate-spin"
-                    : ""
-                }
-              />
-              <span className="hidden sm:inline">
-                Refresh
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={logout}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0B1F33] px-4 text-sm font-semibold text-white transition hover:bg-[#102A45]"
-            >
-              <LogOut size={16} />
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-[1600px] px-5 py-7 lg:px-8 lg:py-9">
-        <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <main className="mx-auto max-w-[1500px]">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <button
-              type="button"
-              onClick={() =>
-                navigate(
-                  "/super-admin/dashboard"
-                )
-              }
-              className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-blue-600"
-            >
-              <ArrowLeft
-                size={16}
-              />
-              Back to Dashboard
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-blue-600" />
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
+                Plan Management
+              </p>
+            </div>
 
-            <p className="mb-1 text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
-              Subscription Management
-            </p>
-
-            <h1 className="text-3xl font-bold tracking-tight text-[#0B1F33] lg:text-[34px]">
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#0B1F33]">
               Subscription Plans
             </h1>
 
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              Manage the plans and official
-              billing prices used across the
-              Invent POS platform.
+              Configure pricing, plan limits and subscription features across Invent POS.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              navigate(
-                "/super-admin/billing"
-              )
-            }
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
-          >
-            <CreditCard
-              size={17}
-            />
-            Billing & Revenue
-          </button>
+          <div className="flex flex-wrap gap-2.5">
+            <button
+              type="button"
+              onClick={() => loadPlans(true)}
+              disabled={refreshing}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              <RefreshCw
+                size={16}
+                className={refreshing ? "animate-spin" : ""}
+              />
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate("/super-admin/billing")}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+            >
+              <CreditCard size={16} />
+              Billing & Revenue
+            </button>
+          </div>
         </div>
 
         {error && (

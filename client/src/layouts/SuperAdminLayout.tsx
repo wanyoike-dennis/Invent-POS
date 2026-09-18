@@ -40,10 +40,10 @@ function SuperAdminLayout() {
     {
       label: "Organizations",
       icon: Building2,
-      path: "/super-admin/dashboard#organizations",
+      path: "/super-admin/organizations",
       match: (pathname) =>
         pathname.startsWith(
-          "/super-admin/organizations/"
+          "/super-admin/organizations"
         ),
     },
     {
@@ -80,40 +80,6 @@ function SuperAdminLayout() {
   const handleNavigation = (path: string) => {
     setMobileNavOpen(false);
 
-    if (
-      path ===
-      "/super-admin/dashboard#organizations"
-    ) {
-      if (
-        location.pathname ===
-        "/super-admin/dashboard"
-      ) {
-        const section =
-          document.getElementById("organizations");
-
-        section?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-
-        return;
-      }
-
-      navigate("/super-admin/dashboard");
-
-      window.setTimeout(() => {
-        const section =
-          document.getElementById("organizations");
-
-        section?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }, 100);
-
-      return;
-    }
-
     navigate(path);
   };
 
@@ -122,6 +88,10 @@ function SuperAdminLayout() {
 
     if (pathname === "/super-admin/dashboard") {
       return "Overview";
+    }
+
+    if (pathname === "/super-admin/organizations") {
+      return "Organizations";
     }
 
     if (

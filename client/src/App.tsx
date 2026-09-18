@@ -19,6 +19,7 @@ import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 import SuperAdminBilling from "./pages/SuperAdminBilling";
 import SuperAdminPlans from "./pages/SuperAdminPlans";
 import SuperAdminSupport from "./pages/SuperAdminSupport";
+import SuperAdminOrganizations from "./pages/SuperAdminOrganizations";
 import SuperAdminOrganizationDetails from "./pages/SuperAdminOrganizationDetails";
 
 import MainLayout from "./layouts/MainLayout";
@@ -61,6 +62,11 @@ function App() {
           <Route
             path="/super-admin/support"
             element={<SuperAdminSupport />}
+          />
+
+          <Route
+            path="/super-admin/organizations"
+            element={<SuperAdminOrganizations />}
           />
 
           <Route

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../services/api";
+import { formatDateTime } from "../utils/dateTime";
 
 type Product = {
   id: number;
@@ -1183,9 +1184,9 @@ function Inventory() {
                     </p>
                     <p className="mt-2 text-sm text-slate-700">
                       {transferDetail.transferred_at
-                        ? new Date(
+                        ? formatDateTime(
                             transferDetail.transferred_at
-                          ).toLocaleString()
+                          )
                         : "—"}
                     </p>
                   </div>
@@ -1797,7 +1798,7 @@ function Inventory() {
 
                     <td className="px-4 py-4 text-sm text-slate-500">
                       {transfer.transferred_at
-                        ? new Date(transfer.transferred_at).toLocaleString()
+                        ? formatDateTime(transfer.transferred_at)
                         : "—"}
                     </td>
                   </tr>
@@ -2028,7 +2029,7 @@ function Inventory() {
                     </td>
 
                     <td className="px-6 py-4 text-sm text-slate-500">
-                      {new Date(movement.created_at).toLocaleString()}
+                      {formatDateTime(movement.created_at)}
                     </td>
                   </tr>
                 ))

@@ -215,11 +215,15 @@ function Dashboard() {
     dashboardData?.sales_chart.map((item) => ({
       ...item,
 
-      day: new Date(
-        `${item.date}T00:00:00`
-      ).toLocaleDateString("en-US", {
+      // sales_chart.date is a business calendar date (YYYY-MM-DD), not
+      // a UTC timestamp. Parse it at midday UTC and format explicitly in
+      // Africa/Nairobi so the weekday cannot shift with the browser timezone.
+      day: new Intl.DateTimeFormat("en-KE", {
         weekday: "short",
-      }),
+        timeZone: "Africa/Nairobi",
+      }).format(
+        new Date(`${item.date}T12:00:00Z`)
+      ),
     })) || [];
 
   if (loading) {

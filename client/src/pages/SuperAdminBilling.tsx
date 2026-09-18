@@ -17,6 +17,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { superAdminFetch } from "../services/api";
+import { formatDate } from "../utils/dateTime";
 
 type BillingSummary = {
   totals?: {
@@ -99,17 +100,72 @@ const label = (value?: string | null) => {
     );
 };
 
-const date = (value?: string | null) => {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString("en-KE", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+
+
+const KENYA_TIME_ZONE = "Africa/Nairobi";
+
+const kenyaDateKey = (
+  value: string | Date
+) => {
+  const parsed =
+    value instanceof Date
+      ? value
+      : new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const parts = new Intl.DateTimeFormat(
+    "en-CA",
+    {
+      timeZone: KENYA_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }
+  ).formatToParts(parsed);
+
+  const year = parts.find(
+    (part) => part.type === "year"
+  )?.value;
+  const month = parts.find(
+    (part) => part.type === "month"
+  )?.value;
+  const day = parts.find(
+    (part) => part.type === "day"
+  )?.value;
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
 };
 
+const dayDifference = (
+  fromKey: string,
+  toKey: string
+) => {
+  const [fromYear, fromMonth, fromDay] =
+    fromKey.split("-").map(Number);
+  const [toYear, toMonth, toDay] =
+    toKey.split("-").map(Number);
+
+  return Math.round(
+    (Date.UTC(
+      toYear,
+      toMonth - 1,
+      toDay
+    ) -
+      Date.UTC(
+        fromYear,
+        fromMonth - 1,
+        fromDay
+      )) /
+      86400000
+  );
+};
 
 const renewalTiming = (
   value?: string | null
@@ -122,9 +178,10 @@ const renewalTiming = (
     };
   }
 
-  const expiry = new Date(value);
+  const expiryKey = kenyaDateKey(value);
+  const todayKey = kenyaDateKey(new Date());
 
-  if (Number.isNaN(expiry.getTime())) {
+  if (!expiryKey || !todayKey) {
     return {
       text: "Invalid date",
       className:
@@ -132,22 +189,9 @@ const renewalTiming = (
     };
   }
 
-  const today = new Date();
-  const todayStart = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  );
-  const expiryStart = new Date(
-    expiry.getFullYear(),
-    expiry.getMonth(),
-    expiry.getDate()
-  );
-
-  const days = Math.round(
-    (expiryStart.getTime() -
-      todayStart.getTime()) /
-      86400000
+  const days = dayDifference(
+    todayKey,
+    expiryKey
   );
 
   if (days < 0) {
@@ -751,7 +795,7 @@ function SuperAdminBilling() {
                           </td>
 
                           <td className="px-3 py-3 text-slate-600">
-                            {date(
+                            {formatDate(
                               renewal.subscription_expires_at
                             )}
                           </td>
@@ -889,14 +933,14 @@ function SuperAdminBilling() {
                             "—"}
                         </td>
                         <td className="px-3 py-3 text-slate-500">
-                          {date(payment.paid_at)}
+                          {formatDate(payment.paid_at)}
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-500">
-                          {date(
+                          {formatDate(
                             payment.period_start
                           )}{" "}
                           –{" "}
-                          {date(payment.period_end)}
+                          {formatDate(payment.period_end)}
                         </td>
                       </tr>
                     )

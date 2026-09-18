@@ -8,6 +8,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiFetch } from "../services/api";
+import {
+  formatDate,
+  formatDateTime,
+  getKenyaDateInputValue,
+} from "../utils/dateTime";
 
 type Product = {
   id: number;
@@ -200,25 +205,33 @@ function Sales() {
     useState<"All" | "Cash" | "M-Pesa" | "Split">("All");
   const [dateFilter, setDateFilter] = useState("");
 
-  const formatLocalDate = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
+  const kenyaToday = getKenyaDateInputValue();
 
-    return `${year}-${month}-${day}`;
+
+  const shiftKenyaDateInputValue = (
+    value: string,
+    days: number
+  ) => {
+    const [year, month, day] = value
+      .split("-")
+      .map(Number);
+
+    const shifted = new Date(
+      Date.UTC(year, month - 1, day + days, 12)
+    );
+
+    return [
+      shifted.getUTCFullYear(),
+      String(shifted.getUTCMonth() + 1).padStart(2, "0"),
+      String(shifted.getUTCDate()).padStart(2, "0"),
+    ].join("-");
   };
 
-  const pastSaleMaxDate = (() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 1);
-    return formatLocalDate(date);
-  })();
+  const pastSaleMaxDate =
+    shiftKenyaDateInputValue(kenyaToday, -1);
 
-  const pastSaleMinDate = (() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 7);
-    return formatLocalDate(date);
-  })();
+  const pastSaleMinDate =
+    shiftKenyaDateInputValue(kenyaToday, -7);
 
   const fetchProducts = async () => {
     try {
@@ -478,21 +491,9 @@ function Sales() {
       let matchesDate = true;
 
       if (dateFilter) {
-        const saleDate = sale.sale_date
-          ? new Date(`${sale.sale_date}T00:00:00`)
-          : new Date(sale.created_at);
-
-        const year = saleDate.getFullYear();
-
-        const month = String(
-          saleDate.getMonth() + 1
-        ).padStart(2, "0");
-
-        const day = String(
-          saleDate.getDate()
-        ).padStart(2, "0");
-
-        const formattedDate = `${year}-${month}-${day}`;
+        const formattedDate = sale.sale_date
+          ? sale.sale_date
+          : getKenyaDateInputValue(sale.created_at);
 
         matchesDate = formattedDate === dateFilter;
       }
@@ -511,28 +512,19 @@ function Sales() {
   ]);
 
   const todaySummary = useMemo(() => {
-    const now = new Date();
+    const today = getKenyaDateInputValue();
 
-    const isToday = (value: string) => {
-      const date = new Date(value);
-
-      return (
-        date.getFullYear() === now.getFullYear() &&
-        date.getMonth() === now.getMonth() &&
-        date.getDate() === now.getDate()
-      );
-    };
-
-    const todaysSales = salesHistory.filter((sale) =>
-      isToday(
-        sale.sale_date
-          ? `${sale.sale_date}T00:00:00`
-          : sale.created_at
-      )
+    const todaysSales = salesHistory.filter(
+      (sale) =>
+        (sale.sale_date ||
+          getKenyaDateInputValue(sale.created_at)) ===
+        today
     );
 
-    const todaysReturns = returnsHistory.filter((record) =>
-      isToday(record.created_at)
+    const todaysReturns = returnsHistory.filter(
+      (record) =>
+        getKenyaDateInputValue(record.created_at) ===
+        today
     );
 
     const grossSales = todaysSales.reduce(
@@ -591,11 +583,9 @@ function Sales() {
       let matchesDate = true;
 
       if (returnHistoryDate) {
-        const returnDate = new Date(record.created_at);
-        const year = returnDate.getFullYear();
-        const month = String(returnDate.getMonth() + 1).padStart(2, "0");
-        const day = String(returnDate.getDate()).padStart(2, "0");
-        matchesDate = `${year}-${month}-${day}` === returnHistoryDate;
+        matchesDate =
+          getKenyaDateInputValue(record.created_at) ===
+          returnHistoryDate;
       }
 
       return matchesSearch && matchesDate;
@@ -603,19 +593,12 @@ function Sales() {
   }, [returnsHistory, returnHistorySearch, returnHistoryDate]);
 
   const returnsSummary = useMemo(() => {
-    const now = new Date();
+    const today = getKenyaDateInputValue();
 
-    const isToday = (value: string) => {
-      const date = new Date(value);
-      return (
-        date.getFullYear() === now.getFullYear() &&
-        date.getMonth() === now.getMonth() &&
-        date.getDate() === now.getDate()
-      );
-    };
-
-    const todayReturns = returnsHistory.filter((record) =>
-      isToday(record.created_at)
+    const todayReturns = returnsHistory.filter(
+      (record) =>
+        getKenyaDateInputValue(record.created_at) ===
+        today
     );
 
     return {
@@ -1243,12 +1226,10 @@ function Sales() {
 
                   <p className="mt-1 text-slate-800">
                     {selectedSale.sale.sale_date
-                      ? new Date(
-                          `${selectedSale.sale.sale_date}T00:00:00`
-                        ).toLocaleDateString()
-                      : new Date(
+                      ? formatDate(selectedSale.sale.sale_date)
+                      : formatDateTime(
                           selectedSale.sale.created_at
-                        ).toLocaleString()}
+                        )}
                   </p>
 
                   {Boolean(selectedSale.sale.is_backdated) && (
@@ -1484,7 +1465,7 @@ function Sales() {
                               Return #{saleReturn.id}
                             </p>
                             <p className="text-xs text-slate-500">
-                              {new Date(saleReturn.created_at).toLocaleString()}
+                              {formatDateTime(saleReturn.created_at)}
                             </p>
                           </div>
 
@@ -2871,7 +2852,7 @@ function Sales() {
                       | "M-Pesa"
                   )
                 }
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               >
                 <option value="All">
                   All Payments
@@ -2892,7 +2873,7 @@ function Sales() {
                 onChange={(e) =>
                   setDateFilter(e.target.value)
                 }
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
 
               <button
@@ -2914,53 +2895,53 @@ function Sales() {
           {/* HISTORY TABLE */}
           <div className="overflow-x-auto">
 
-            <table className="w-full text-left">
+            <table className="w-full min-w-[1420px] table-auto text-left">
 
               <thead className="border-b border-slate-200 bg-slate-50">
 
                 <tr>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[215px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Receipt
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[150px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Customer
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[105px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Original
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[110px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Refunded
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[105px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Net Sale
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[145px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Status
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[100px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Payment
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[120px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Cashier
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[135px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Branch
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[185px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Date
                   </th>
 
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">
+                  <th className="min-w-[125px] px-4 py-4 text-sm font-semibold text-slate-600">
                     Action
                   </th>
 
@@ -2979,8 +2960,8 @@ function Sales() {
                       className="transition hover:bg-slate-50"
                     >
 
-                      <td className="whitespace-nowrap px-6 py-4 font-medium text-slate-800">
-                        <div className="flex items-center gap-2">
+                      <td className="whitespace-nowrap px-4 py-4 font-medium text-slate-800">
+                        <div className="flex items-center gap-2 whitespace-nowrap">
                           <span>{sale.receipt_number}</span>
 
                           {Boolean(sale.is_backdated) && (
@@ -2991,7 +2972,7 @@ function Sales() {
                         </div>
                       </td>
 
-                      <td className="px-6 py-4 text-slate-600">
+                      <td className="min-w-[150px] px-4 py-4 text-slate-600">
                         <div className="font-medium text-slate-700">
                           {sale.customer_name || "Walk-in Customer"}
                         </div>
@@ -3002,11 +2983,11 @@ function Sales() {
                         )}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-4 font-semibold text-slate-800">
+                      <td className="whitespace-nowrap px-4 py-4 font-semibold text-slate-800">
                         KES {Number(sale.total).toLocaleString()}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-4">
+                      <td className="whitespace-nowrap px-4 py-4">
 
                         {sale.refunded_amount > 0 ? (
 
@@ -3027,14 +3008,14 @@ function Sales() {
 
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-4 font-bold text-slate-800">
+                      <td className="whitespace-nowrap px-4 py-4 font-bold text-slate-800">
                         KES{" "}
                         {Number(
                           sale.net_total
                         ).toLocaleString()}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-4">
+                      <td className="whitespace-nowrap px-4 py-4">
 
                         <span
                           className={`rounded-full px-3 py-1 text-xs font-semibold ${
@@ -3050,10 +3031,10 @@ function Sales() {
 
                       </td>
 
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4">
 
                         <span
-                          className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
                             sale.payment_method === "M-Pesa"
                               ? "bg-green-50 text-green-700"
                               : "bg-blue-50 text-blue-700"
@@ -3064,11 +3045,11 @@ function Sales() {
 
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-4 text-slate-600">
+                      <td className="whitespace-nowrap px-4 py-4 text-slate-600">
                         {sale.sold_by_name || "Unknown"}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-4 text-slate-600">
+                      <td className="whitespace-nowrap px-4 py-4 text-slate-600">
                         <div className="font-medium text-slate-700">
                           {sale.branch_name || "Main Branch"}
                         </div>
@@ -3079,28 +3060,24 @@ function Sales() {
                         )}
                       </td>
 
-                      <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500">
+                      <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-500">
                         <div>
                           {sale.sale_date
-                            ? new Date(
-                                `${sale.sale_date}T00:00:00`
-                              ).toLocaleDateString()
-                            : new Date(
-                                sale.created_at
-                              ).toLocaleString()}
+                            ? formatDate(sale.sale_date)
+                            : formatDateTime(sale.created_at)}
                         </div>
 
                         {Boolean(sale.is_backdated) && (
                           <div className="mt-1 text-xs text-slate-400">
                             Recorded{" "}
-                            {new Date(
+                            {formatDateTime(
                               sale.created_at
-                            ).toLocaleString()}
+                            )}
                           </div>
                         )}
                       </td>
 
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4">
 
                         <button
                           type="button"
@@ -3108,7 +3085,7 @@ function Sales() {
                           onClick={() =>
                             viewSaleDetails(sale.id)
                           }
-                          className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {loadingReceipt
                             ? "Loading..."
@@ -3126,7 +3103,7 @@ function Sales() {
                   <tr>
 
                     <td
-                      colSpan={9}
+                      colSpan={11}
                       className="px-6 py-12 text-center text-slate-500"
                     >
                       {salesHistory.length === 0
@@ -3231,7 +3208,7 @@ function Sales() {
                         <td className="whitespace-nowrap px-6 py-4 font-semibold text-orange-600">KES {record.refund_amount.toLocaleString()}</td>
                         <td className="max-w-xs px-6 py-4 text-sm text-slate-600">{record.reason}</td>
                         <td className="whitespace-nowrap px-6 py-4 text-slate-600">{record.returned_by_name || "Unknown"}</td>
-                        <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500">{new Date(record.created_at).toLocaleString()}</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-500">{formatDateTime(record.created_at)}</td>
                         <td className="px-6 py-4">
                           <button
                             type="button"

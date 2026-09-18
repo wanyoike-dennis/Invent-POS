@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { apiFetch } from "../services/api";
+import { formatDateTime } from "../utils/dateTime";
 
 type Branch = {
   id: number;
@@ -116,19 +117,6 @@ const formatAction = (action: string) =>
     )
     .join(" · ");
 
-const formatDateTime = (value: string) => {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("en-KE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-};
-
 const getErrorMessage = (error: unknown) => {
   if (error instanceof Error) {
     return error.message;
@@ -172,7 +160,15 @@ export default function AuditAnalytics() {
   };
 
   const loadOptions = async () => {
-    const data = (await apiFetch("/api/audit/options")) as Partial<AuditOptions>;
+    const response = await apiFetch("/api/audit/options");
+    const data = (await response.json()) as Partial<AuditOptions>;
+
+    if (!response.ok) {
+      throw new Error(
+        (data as { message?: string })?.message ||
+          "Failed to load audit filter options"
+      );
+    }
 
     setOptions({
       branches: Array.isArray(data?.branches) ? data.branches : [],
@@ -198,10 +194,29 @@ export default function AuditAnalytics() {
 
       const summaryParams = buildParams(false);
 
-      const [feedData, summaryData] = await Promise.all([
+      const [feedResponse, summaryResponse] = await Promise.all([
         apiFetch(`/api/audit?${feedParams.toString()}`),
         apiFetch(`/api/audit/summary?${summaryParams.toString()}`),
       ]);
+
+      const [feedData, summaryData] = await Promise.all([
+        feedResponse.json(),
+        summaryResponse.json(),
+      ]);
+
+      if (!feedResponse.ok) {
+        throw new Error(
+          (feedData as { message?: string })?.message ||
+            "Failed to load audit activity"
+        );
+      }
+
+      if (!summaryResponse.ok) {
+        throw new Error(
+          (summaryData as { message?: string })?.message ||
+            "Failed to load audit summary"
+        );
+      }
 
       const safeFeed = feedData as Partial<AuditFeed>;
       const safeSummary = summaryData as Partial<AuditSummary>;

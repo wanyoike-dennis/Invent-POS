@@ -1,7 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
-  ArrowLeft,
   Building2,
   CheckCircle2,
   ChevronLeft,
@@ -9,7 +8,6 @@ import {
   Clock3,
   Headphones,
   Loader2,
-  LogOut,
   MessageSquare,
   RefreshCw,
   Search,
@@ -20,8 +18,9 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { superAdminFetch } from "../services/api";
+import { formatDateTime } from "../utils/dateTime";
 
 type TicketStatus =
   | "open"
@@ -158,6 +157,25 @@ const supportLevelStyles: Record<SupportLevel, string> = {
 
 function SuperAdminSupport() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const readStatusFromUrl = (params: URLSearchParams) => {
+    const value = params.get("status");
+    return value &&
+      ["open", "in_progress", "waiting_customer", "resolved", "closed"].includes(value)
+      ? value
+      : "";
+  };
+
+  const readPriorityFromUrl = (params: URLSearchParams) => {
+    const value = params.get("priority");
+    return value && ["low", "normal", "high", "urgent"].includes(value)
+      ? value
+      : "";
+  };
+
+  const initialStatus = readStatusFromUrl(searchParams);
+  const initialPriority = readPriorityFromUrl(searchParams);
 
   const [overview, setOverview] = useState<OverviewResponse>({});
   const [options, setOptions] = useState<OptionsResponse>({});
@@ -170,8 +188,8 @@ function SuperAdminSupport() {
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [priority, setPriority] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+  const [priority, setPriority] = useState(initialPriority);
   const [supportLevel, setSupportLevel] = useState("");
   const [organizationId, setOrganizationId] = useState("");
   const [category, setCategory] = useState("");
@@ -289,7 +307,7 @@ function SuperAdminSupport() {
         else setLoading(true);
 
         setError("");
-        await Promise.all([loadOverview(), loadOptions(), loadTickets()]);
+        await Promise.all([loadOverview(), loadOptions(), loadTickets(1)]);
       } catch (err) {
         setError(
           err instanceof Error
@@ -307,6 +325,35 @@ function SuperAdminSupport() {
   useEffect(() => {
     loadInitialData();
   }, []);
+
+  useEffect(() => {
+    const urlStatus = readStatusFromUrl(searchParams);
+    const urlPriority = readPriorityFromUrl(searchParams);
+
+    if (urlStatus !== status) {
+      setStatus(urlStatus);
+      setPage(1);
+    }
+
+    if (urlPriority !== priority) {
+      setPriority(urlPriority);
+      setPage(1);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const nextParams = new URLSearchParams(searchParams);
+
+    if (status) nextParams.set("status", status);
+    else nextParams.delete("status");
+
+    if (priority) nextParams.set("priority", priority);
+    else nextParams.delete("priority");
+
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [priority, searchParams, setSearchParams, status]);
 
   useEffect(() => {
     if (loading) return;
@@ -474,21 +521,6 @@ function SuperAdminSupport() {
     }
   };
 
-  const formatDateTime = (value?: string | null) => {
-    if (!value) return "—";
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-
-    return date.toLocaleString("en-KE", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
   const counts = overview?.counts || {};
   const tierCounts = overview?.bySupportLevel || {};
 
@@ -551,90 +583,59 @@ function SuperAdminSupport() {
   );
 
   return (
-    <div className="min-h-screen bg-[#F5F7FB]">
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-5 py-4 lg:px-8">
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => navigate("/super-admin/dashboard")}
-              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
-              title="Back to dashboard"
-            >
-              <ArrowLeft size={20} />
-            </button>
+    <div className="px-5 py-7 lg:px-8 lg:py-8 xl:px-10">
 
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0B1F33] text-white shadow-sm">
-              <Headphones size={22} />
-            </div>
-
-            <div>
-              <p className="text-base font-bold text-[#0B1F33]">Invent POS</p>
-              <p className="text-xs font-medium text-slate-500">
-                Platform Support Center
+      <main className="mx-auto max-w-[1500px]">
+        <div className="mb-6 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-blue-600" />
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
+                Support Operations
               </p>
             </div>
+
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#0B1F33]">
+              Support Center
+            </h1>
+
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              Manage customer support requests across all Invent POS organizations
+              while keeping unrelated tenant business data isolated.
+            </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+              {(["Dedicated", "Priority", "Standard"] as SupportLevel[]).map(
+                (level) => (
+                  <div
+                    key={level}
+                    className="min-w-[88px] rounded-lg px-3 py-1.5 text-center"
+                  >
+                    <p className="text-base font-bold text-[#0B1F33]">
+                      {Number(tierCounts[level] || 0)}
+                    </p>
+                    <p className="text-[10px] font-semibold text-slate-500">
+                      {level}
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+
             <button
               type="button"
               onClick={refreshAll}
               disabled={refreshing}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
             >
               <RefreshCw
                 size={16}
                 className={refreshing ? "animate-spin" : ""}
               />
-              <span className="hidden sm:inline">Refresh</span>
+              {refreshing ? "Refreshing..." : "Refresh"}
             </button>
-
-            <div className="hidden h-8 w-px bg-slate-200 sm:block" />
-
-            <button
-              type="button"
-              onClick={logout}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0B1F33] px-4 text-sm font-semibold text-white transition hover:bg-[#102A45]"
-            >
-              <LogOut size={16} />
-              Logout
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-[1600px] px-5 py-7 lg:px-8 lg:py-9">
-        <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="mb-1 text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
-              Customer Support
-            </p>
-            <h1 className="text-3xl font-bold tracking-tight text-[#0B1F33] lg:text-[34px]">
-              Support Center
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-              Manage customer support requests across Invent POS organizations
-              while keeping unrelated tenant business data isolated.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-            {(["Dedicated", "Priority", "Standard"] as SupportLevel[]).map(
-              (level) => (
-                <div
-                  key={level}
-                  className="min-w-[100px] rounded-xl px-3 py-2 text-center"
-                >
-                  <p className="text-lg font-bold text-[#0B1F33]">
-                    {Number(tierCounts[level] || 0)}
-                  </p>
-                  <p className="text-[11px] font-semibold text-slate-500">
-                    {level}
-                  </p>
-                </div>
-              )
-            )}
           </div>
         </div>
 
