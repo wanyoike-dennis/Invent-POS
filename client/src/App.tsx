@@ -13,6 +13,7 @@ import Settings from "./pages/Settings";
 import Branches from "./pages/Branches";
 import AuditAnalytics from "./pages/AuditAnalytics";
 import Support from "./pages/Support";
+import Notifications from "./pages/Notifications";
 
 import SuperAdminLogin from "./pages/SuperAdminLogin";
 import SuperAdminDashboard from "./pages/SuperAdminDashboard";
@@ -132,6 +133,11 @@ function App() {
           <Route
             path="/support"
             element={<Support />}
+          />
+
+          <Route
+            path="/notifications"
+            element={<Notifications />}
           />
 
           <Route

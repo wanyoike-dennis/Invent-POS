@@ -1,6 +1,7 @@
 import { Router } from "express";
 import db from "../database/db.js";
 import { tryLogAuditEvent } from "../services/auditService.js";
+import { tryCreateNotification } from "../services/notificationService.js";
 import {
   authorizeRoles,
   type AuthRequest,
@@ -620,6 +621,46 @@ router.post(
           })),
         },
       });
+
+      const totalUnits = result.items.reduce(
+        (sum, item) => sum + item.quantity,
+        0
+      );
+
+      const transferRecipients = db
+        .prepare(`
+          SELECT DISTINCT id
+          FROM users
+          WHERE organization_id = ?
+            AND is_active = 1
+            AND (
+              role = 'admin'
+              OR (
+                role = 'manager'
+                AND branch_id = ?
+              )
+            )
+          ORDER BY id ASC
+        `)
+        .all(
+          organizationId,
+          toBranch.id
+        ) as { id: number }[];
+
+      for (const recipient of transferRecipients) {
+        tryCreateNotification({
+          organizationId,
+          userId: recipient.id,
+          branchId: toBranch.id,
+          type: "inventory",
+          severity: "success",
+          title: "Stock transfer received",
+          message: `${totalUnits} unit${totalUnits === 1 ? "" : "s"} across ${result.items.length} product${result.items.length === 1 ? "" : "s"} transferred from ${fromBranch.name} to ${toBranch.name}.`,
+          entityType: "stock_transfer",
+          entityId: result.transferId,
+          actionUrl: "/inventory",
+        });
+      }
 
       const organizationStock = result.items.map((item) => {
         const aggregate = db

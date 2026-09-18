@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   LineChart,
   Line,
@@ -81,6 +82,7 @@ type Branch = {
 };
 
 function Dashboard() {
+  const navigate = useNavigate();
   const storedUser = localStorage.getItem("user");
   let userRole = "";
 
@@ -822,26 +824,46 @@ function Dashboard() {
 
           {isCashier ? (
             <div className="p-6">
-              <button className="w-full rounded-lg bg-blue-50 p-5 text-left text-blue-700 transition hover:bg-blue-100">
+              <button
+                type="button"
+                onClick={() => navigate("/sales")}
+                className="w-full rounded-lg bg-blue-50 p-5 text-left text-blue-700 transition hover:bg-blue-100"
+              >
                 <p className="font-semibold">New Sale</p>
                 <p className="mt-1 text-sm">Start a transaction</p>
               </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 p-6">
-              <button className="rounded-lg bg-blue-50 p-5 text-blue-700 transition hover:bg-blue-100">
+              <button
+                type="button"
+                onClick={() => navigate("/sales")}
+                className="rounded-lg bg-blue-50 p-5 text-blue-700 transition hover:bg-blue-100"
+              >
                 <p className="font-semibold">New Sale</p>
                 <p className="mt-1 text-sm">Start a transaction</p>
               </button>
-              <button className="rounded-lg bg-green-50 p-5 text-green-700 transition hover:bg-green-100">
+              <button
+                type="button"
+                onClick={() => navigate("/products")}
+                className="rounded-lg bg-green-50 p-5 text-green-700 transition hover:bg-green-100"
+              >
                 <p className="font-semibold">Add Product</p>
                 <p className="mt-1 text-sm">Create new product</p>
               </button>
-              <button className="rounded-lg bg-purple-50 p-5 text-purple-700 transition hover:bg-purple-100">
+              <button
+                type="button"
+                onClick={() => navigate("/expenses")}
+                className="rounded-lg bg-purple-50 p-5 text-purple-700 transition hover:bg-purple-100"
+              >
                 <p className="font-semibold">Add Expense</p>
                 <p className="mt-1 text-sm">Record business expense</p>
               </button>
-              <button className="rounded-lg bg-orange-50 p-5 text-orange-700 transition hover:bg-orange-100">
+              <button
+                type="button"
+                onClick={() => navigate("/reports")}
+                className="rounded-lg bg-orange-50 p-5 text-orange-700 transition hover:bg-orange-100"
+              >
                 <p className="font-semibold">View Reports</p>
                 <p className="mt-1 text-sm">Analyze your business</p>
               </button>

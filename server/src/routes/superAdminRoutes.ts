@@ -2,6 +2,7 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import db from "../database/db.js";
+import { tryCreateNotification } from "../services/notificationService.js";
 import { type BillingCycle, type SubscriptionPlan } from "../config/subscriptionPricing.js";
 
 const router = express.Router();
@@ -2681,7 +2682,7 @@ router.post("/support/:id/messages", (req: SuperAdminRequest, res) => {
   try {
     const ticket = db
       .prepare(`
-        SELECT id, organization_id, status
+        SELECT id, organization_id, created_by, ticket_number, subject, status
         FROM support_tickets
         WHERE id = ?
         LIMIT 1
@@ -2690,6 +2691,9 @@ router.post("/support/:id/messages", (req: SuperAdminRequest, res) => {
       | {
           id: number;
           organization_id: number;
+          created_by: number;
+          ticket_number: string;
+          subject: string;
           status: string;
         }
       | undefined;
@@ -2738,6 +2742,18 @@ router.post("/support/:id/messages", (req: SuperAdminRequest, res) => {
     });
 
     const messageId = addReply();
+
+    tryCreateNotification({
+      organizationId: ticket.organization_id,
+      userId: ticket.created_by,
+      type: "support",
+      severity: "info",
+      title: "Support replied",
+      message: `Support replied to ticket ${ticket.ticket_number}: ${ticket.subject}.`,
+      entityType: "support_ticket",
+      entityId: ticket.id,
+      actionUrl: "/support",
+    });
 
     return res.status(201).json({
       message: "Support reply sent successfully",
@@ -2808,7 +2824,7 @@ router.patch("/support/:id", (req, res) => {
   try {
     const existing = db
       .prepare(`
-        SELECT id, status, priority
+        SELECT id, organization_id, created_by, ticket_number, subject, status, priority
         FROM support_tickets
         WHERE id = ?
         LIMIT 1
@@ -2816,6 +2832,10 @@ router.patch("/support/:id", (req, res) => {
       .get(ticketId) as
       | {
           id: number;
+          organization_id: number;
+          created_by: number;
+          ticket_number: string;
+          subject: string;
           status: string;
           priority: string;
         }
@@ -2860,6 +2880,39 @@ router.patch("/support/:id", (req, res) => {
       nextStatus,
       ticketId
     );
+
+    const statusChanged = nextStatus !== existing.status;
+
+    if (statusChanged) {
+      const statusLabels: Record<string, string> = {
+        open: "Open",
+        in_progress: "In progress",
+        waiting_customer: "Waiting for customer",
+        resolved: "Resolved",
+        closed: "Closed",
+      };
+
+      const severity =
+        nextStatus === "resolved"
+          ? "success"
+          : nextStatus === "closed"
+            ? "info"
+            : nextStatus === "waiting_customer"
+              ? "warning"
+              : "info";
+
+      tryCreateNotification({
+        organizationId: existing.organization_id,
+        userId: existing.created_by,
+        type: "support",
+        severity,
+        title: "Support ticket status updated",
+        message: `Ticket ${existing.ticket_number}: ${existing.subject} is now ${statusLabels[nextStatus] || nextStatus}.`,
+        entityType: "support_ticket",
+        entityId: existing.id,
+        actionUrl: "/support",
+      });
+    }
 
     const updated = db
       .prepare(`

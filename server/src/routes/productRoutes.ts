@@ -1,6 +1,7 @@
 import express from "express";
 import db from "../database/db.js";
 import { tryLogAuditEvent } from "../services/auditService.js";
+import { tryCreateNotification } from "../services/notificationService.js";
 import { authorizeRoles } from "../middleware/authMiddleware.js";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 
@@ -539,6 +540,45 @@ router.patch("/:id/stock", authorizeRoles("admin", "manager"), (req: AuthRequest
     },
   });
 
+  const adjustmentReason =
+    typeof reason === "string" && reason.trim()
+      ? reason.trim()
+      : "Manual stock adjustment";
+
+  const adjustmentRecipients = db
+    .prepare(`
+      SELECT DISTINCT id
+      FROM users
+      WHERE organization_id = ?
+        AND is_active = 1
+        AND (
+          role = 'admin'
+          OR (
+            role = 'manager'
+            AND branch_id = ?
+          )
+        )
+      ORDER BY id ASC
+    `)
+    .all(organizationId, branch.id) as { id: number }[];
+
+  for (const recipient of adjustmentRecipients) {
+    tryCreateNotification({
+      organizationId,
+      userId: recipient.id,
+      branchId: branch.id,
+      type: "inventory",
+      severity: type === "out" ? "warning" : "info",
+      title: "Stock manually adjusted",
+      message: `${qty} unit${qty === 1 ? "" : "s"} of ${product.name} ${
+        type === "in" ? "added to" : "removed from"
+      } ${branch.name}. Reason: ${adjustmentReason}.`,
+      entityType: "product",
+      entityId: product.id,
+      actionUrl: "/inventory",
+    });
+  }
+
   return res.json({
     message: "Stock updated successfully",
     branch: {
@@ -845,6 +885,54 @@ router.post(
         newBranchStock,
       },
     });
+
+    const supplierName = supplierId
+      ? (
+          db
+            .prepare(`
+              SELECT name
+              FROM suppliers
+              WHERE id = ?
+                AND organization_id = ?
+              LIMIT 1
+            `)
+            .get(supplierId, organizationId) as { name: string } | undefined
+        )?.name ?? null
+      : null;
+
+    const purchaseRecipients = db
+      .prepare(`
+        SELECT DISTINCT id
+        FROM users
+        WHERE organization_id = ?
+          AND is_active = 1
+          AND (
+            role = 'admin'
+            OR (
+              role = 'manager'
+              AND branch_id = ?
+            )
+          )
+        ORDER BY id ASC
+      `)
+      .all(organizationId, branch.id) as { id: number }[];
+
+    for (const recipient of purchaseRecipients) {
+      tryCreateNotification({
+        organizationId,
+        userId: recipient.id,
+        branchId: branch.id,
+        type: "inventory",
+        severity: "success",
+        title: "Stock restocked",
+        message: `${qty} unit${qty === 1 ? "" : "s"} of ${product.name} added to ${branch.name}${
+          supplierName ? ` from ${supplierName}` : ""
+        }.`,
+        entityType: "product",
+        entityId: product.id,
+        actionUrl: "/inventory",
+      });
+    }
 
     const updatedProduct = db
       .prepare(`

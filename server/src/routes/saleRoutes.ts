@@ -1,6 +1,7 @@
 import express from "express";
 import db from "../database/db.js";
 import { tryLogAuditEvent } from "../services/auditService.js";
+import { tryCreateNotification } from "../services/notificationService.js";
 import type { AuthRequest } from "../middleware/authMiddleware.js";
 import { authorizeRoles } from "../middleware/authMiddleware.js";
 
@@ -181,6 +182,141 @@ const getAuthenticatedSaleBranch = (
   }
 
   return branch;
+};
+
+
+type StockAlertProduct = {
+  id: number;
+  name: string;
+  stock: number;
+};
+
+const createSaleStockAlerts = ({
+  organizationId,
+  branch,
+  productIds,
+}: {
+  organizationId: number;
+  branch: SaleBranch;
+  productIds: number[];
+}) => {
+  const uniqueProductIds = [
+    ...new Set(
+      productIds
+        .map(Number)
+        .filter(
+          (productId) =>
+            Number.isInteger(productId) && productId > 0
+        )
+    ),
+  ];
+
+  if (uniqueProductIds.length === 0) {
+    return;
+  }
+
+  const placeholders = uniqueProductIds
+    .map(() => "?")
+    .join(", ");
+
+  const products = db
+    .prepare(`
+      SELECT
+        p.id,
+        p.name,
+        COALESCE(bi.stock, 0) AS stock
+      FROM products p
+      LEFT JOIN branch_inventory bi
+        ON bi.organization_id = p.organization_id
+        AND bi.branch_id = ?
+        AND bi.product_id = p.id
+      WHERE p.organization_id = ?
+        AND p.id IN (${placeholders})
+    `)
+    .all(
+      branch.id,
+      organizationId,
+      ...uniqueProductIds
+    ) as StockAlertProduct[];
+
+  const recipients = db
+    .prepare(`
+      SELECT id
+      FROM users
+      WHERE organization_id = ?
+        AND branch_id = ?
+        AND is_active = 1
+        AND role IN ('admin', 'manager')
+      ORDER BY id ASC
+    `)
+    .all(
+      organizationId,
+      branch.id
+    ) as { id: number }[];
+
+  if (recipients.length === 0) {
+    return;
+  }
+
+  for (const product of products) {
+    const stock = Number(product.stock || 0);
+    const threshold = 5;
+
+    if (stock > threshold) {
+      continue;
+    }
+
+    const isOutOfStock = stock <= 0;
+    const alertKey = isOutOfStock
+      ? "out_of_stock"
+      : "low_stock";
+
+    for (const recipient of recipients) {
+      const existingUnread = db
+        .prepare(`
+          SELECT id
+          FROM notifications
+          WHERE organization_id = ?
+            AND user_id = ?
+            AND branch_id = ?
+            AND type = 'inventory'
+            AND entity_type = ?
+            AND entity_id = ?
+            AND is_read = 0
+          LIMIT 1
+        `)
+        .get(
+          organizationId,
+          recipient.id,
+          branch.id,
+          alertKey,
+          String(product.id)
+        );
+
+      if (existingUnread) {
+        continue;
+      }
+
+      tryCreateNotification({
+        organizationId,
+        userId: recipient.id,
+        branchId: branch.id,
+        type: "inventory",
+        severity: isOutOfStock
+          ? "critical"
+          : "warning",
+        title: isOutOfStock
+          ? "Product out of stock"
+          : "Low stock alert",
+        message: isOutOfStock
+          ? `${product.name} is out of stock at ${branch.name}.`
+          : `${product.name} has ${stock} unit${stock === 1 ? "" : "s"} remaining at ${branch.name}.`,
+        entityType: alertKey,
+        entityId: product.id,
+        actionUrl: "/inventory",
+      });
+    }
+  }
 };
 
 
@@ -676,6 +812,12 @@ router.post("/", (req: AuthRequest, res) => {
       },
     });
 
+    createSaleStockAlerts({
+      organizationId,
+      branch: sale.branch,
+      productIds: items.map((item) => Number(item.productId)),
+    });
+
     res.status(201).json({
       message: "Sale completed successfully",
       sale,
@@ -1095,6 +1237,12 @@ router.post(
             quantity: Number(item.quantity),
           })),
         },
+      });
+
+      createSaleStockAlerts({
+        organizationId,
+        branch: sale.branch,
+        productIds: items.map((item) => Number(item.productId)),
       });
 
       return res.status(201).json({

@@ -24,10 +24,82 @@ import {
   X,
   Bell,
   ChevronDown,
+  CheckCheck,
+  PackageX,
+  LifeBuoy,
+  CreditCard,
+  UserRound,
+  ShieldAlert,
+  Info,
   MapPin,
 } from "lucide-react";
 
 type EntitlementValue = string | number | boolean | null;
+
+
+type NotificationItem = {
+  id: number;
+  userId: number | null;
+  branch: {
+    id: number;
+    name: string;
+    code: string | null;
+  } | null;
+  type: "inventory" | "support" | "subscription" | "staff" | "security" | "system";
+  severity: "info" | "success" | "warning" | "critical";
+  title: string;
+  message: string;
+  entityType: string | null;
+  entityId: string | null;
+  actionUrl: string | null;
+  isRead: boolean;
+  readAt: string | null;
+  createdAt: string;
+};
+
+type NotificationListResponse = {
+  notifications: NotificationItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasPreviousPage: boolean;
+    hasNextPage: boolean;
+  };
+};
+
+const formatNotificationTime = (value: string) => {
+  if (!value) return "";
+
+  const normalized =
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+      ? `${value.replace(" ", "T")}Z`
+      : value;
+
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.floor(diffMs / 60000);
+
+  if (diffMinutes < 1) return "Just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  return new Intl.DateTimeFormat("en-KE", {
+    timeZone: "Africa/Nairobi",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+};
 
 type EntitlementResponse = {
   plan: {
@@ -42,6 +114,12 @@ function MainLayout() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationError, setNotificationError] = useState("");
+
   const [entitlements, setEntitlements] =
     useState<EntitlementResponse | null>(null);
   const [entitlementsLoading, setEntitlementsLoading] = useState(true);
@@ -106,6 +184,165 @@ const user = storedUser
       cancelled = true;
     };
   }, []);
+
+  const loadNotifications = async () => {
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setNotificationsLoading(false);
+      return;
+    }
+
+    try {
+      setNotificationError("");
+
+      const [listResponse, countResponse] = await Promise.all([
+        fetch("/api/notifications?limit=6", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch("/api/notifications/unread-count", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ]);
+
+      if (!listResponse.ok || !countResponse.ok) {
+        throw new Error("Failed to load notifications");
+      }
+
+      const listData =
+        (await listResponse.json()) as NotificationListResponse;
+
+      const countData =
+        (await countResponse.json()) as {
+          unreadCount: number;
+        };
+
+      setNotifications(listData.notifications || []);
+      setUnreadCount(Number(countData.unreadCount || 0));
+    } catch (error) {
+      console.error("Load notifications error:", error);
+      setNotificationError("Unable to load notifications.");
+    } finally {
+      setNotificationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+
+    const handleNotificationRefresh = () => {
+      loadNotifications();
+    };
+
+    window.addEventListener(
+      "invent-pos:notifications-refresh",
+      handleNotificationRefresh
+    );
+
+    const interval = window.setInterval(() => {
+      loadNotifications();
+    }, 60000);
+
+    return () => {
+      window.removeEventListener(
+        "invent-pos:notifications-refresh",
+        handleNotificationRefresh
+      );
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const markNotificationAsRead = async (
+    notification: NotificationItem
+  ) => {
+    const token = localStorage.getItem("token");
+
+    if (!token) return;
+
+    if (!notification.isRead) {
+      try {
+        const response = await fetch(
+          `/api/notifications/${notification.id}/read`,
+          {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to mark notification as read");
+        }
+
+        setNotifications((current) =>
+          current.map((item) =>
+            item.id === notification.id
+              ? { ...item, isRead: true }
+              : item
+          )
+        );
+
+        setUnreadCount((current) => Math.max(0, current - 1));
+      } catch (error) {
+        console.error("Mark notification read error:", error);
+      }
+    }
+
+    setNotificationOpen(false);
+
+    if (notification.actionUrl) {
+      navigate(notification.actionUrl);
+    }
+  };
+
+  const markAllNotificationsAsRead = async () => {
+    const token = localStorage.getItem("token");
+
+    if (!token || unreadCount === 0) return;
+
+    try {
+      const response = await fetch(
+        "/api/notifications/read-all",
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to mark all notifications as read");
+      }
+
+      setNotifications((current) =>
+        current.map((item) => ({
+          ...item,
+          isRead: true,
+        }))
+      );
+
+      setUnreadCount(0);
+    } catch (error) {
+      console.error("Mark all notifications read error:", error);
+    }
+  };
+
+  const notificationIcon = (type: NotificationItem["type"]) => {
+    if (type === "inventory") return PackageX;
+    if (type === "support") return LifeBuoy;
+    if (type === "subscription") return CreditCard;
+    if (type === "staff") return UserRound;
+    if (type === "security") return ShieldAlert;
+    return Info;
+  };
 
   const hasEntitlement = (featureKey: string) => {
     if (!entitlements) {
@@ -468,15 +705,172 @@ const handleLogout = () => {
           {/* Right side */}
           <div className="flex items-center gap-3">
 
-            {/* Notification */}
-            <button
-              type="button"
-              className="relative rounded-xl p-2 text-slate-500 transition hover:bg-[#F5F8FA] hover:text-[#071827]"
-            >
-              <Bell size={20} />
+            {/* Notifications */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setNotificationOpen(!notificationOpen);
+                  setProfileOpen(false);
+                  if (!notificationOpen) {
+                    loadNotifications();
+                  }
+                }}
+                className="relative rounded-xl p-2 text-slate-500 transition hover:bg-[#F5F8FA] hover:text-[#071827]"
+                aria-label="Notifications"
+              >
+                <Bell size={20} />
 
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500" />
-            </button>
+                {unreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notificationOpen && (
+                <div className="absolute right-0 top-12 z-50 w-[calc(100vw-2rem)] max-w-[390px] overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_20px_60px_rgba(7,24,39,0.16)]">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3.5">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Notifications
+                      </h3>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {unreadCount > 0
+                          ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`
+                          : "You're all caught up"}
+                      </p>
+                    </div>
+
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={markAllNotificationsAsRead}
+                        className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-[#246BFD] transition hover:bg-[#246BFD]/[0.07]"
+                      >
+                        <CheckCheck size={15} />
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-[420px] overflow-y-auto">
+                    {notificationsLoading ? (
+                      <div className="px-4 py-10 text-center text-sm text-slate-500">
+                        Loading notifications...
+                      </div>
+                    ) : notificationError ? (
+                      <div className="px-4 py-10 text-center">
+                        <p className="text-sm text-red-600">
+                          {notificationError}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={loadNotifications}
+                          className="mt-2 text-xs font-medium text-[#246BFD]"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    ) : notifications.length === 0 ? (
+                      <div className="px-6 py-12 text-center">
+                        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                          <Bell size={20} />
+                        </div>
+                        <p className="mt-3 text-sm font-medium text-slate-700">
+                          No notifications yet
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Important business alerts will appear here.
+                        </p>
+                      </div>
+                    ) : (
+                      notifications.map((notification) => {
+                        const NotificationIcon =
+                          notificationIcon(notification.type);
+
+                        return (
+                          <button
+                            key={notification.id}
+                            type="button"
+                            onClick={() =>
+                              markNotificationAsRead(notification)
+                            }
+                            className={`relative flex w-full gap-3 border-b border-slate-100 px-4 py-3.5 text-left transition last:border-b-0 hover:bg-[#F5F8FA] ${
+                              notification.isRead
+                                ? "bg-white"
+                                : "bg-[#246BFD]/[0.035]"
+                            }`}
+                          >
+                            {!notification.isRead && (
+                              <span className="absolute right-3 top-4 h-2 w-2 rounded-full bg-[#246BFD]" />
+                            )}
+
+                            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                              <NotificationIcon size={17} />
+                            </div>
+
+                            <div className="min-w-0 flex-1 pr-3">
+                              <div className="flex items-center gap-2">
+                                <p
+                                  className={`truncate text-sm ${
+                                    notification.isRead
+                                      ? "font-medium text-slate-700"
+                                      : "font-semibold text-slate-900"
+                                  }`}
+                                >
+                                  {notification.title}
+                                </p>
+
+                                {notification.severity === "critical" && (
+                                  <span className="shrink-0 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-600">
+                                    Critical
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                                {notification.message}
+                              </p>
+
+                              <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-400">
+                                <span>
+                                  {formatNotificationTime(
+                                    notification.createdAt
+                                  )}
+                                </span>
+
+                                {notification.branch?.name && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="truncate">
+                                      {notification.branch.name}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="border-t border-slate-200 bg-slate-50/70 p-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotificationOpen(false);
+                        navigate("/notifications");
+                      }}
+                      className="w-full rounded-xl px-3 py-2.5 text-center text-sm font-medium text-[#246BFD] transition hover:bg-[#246BFD]/[0.07]"
+                    >
+                      View all notifications
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="hidden h-8 w-px bg-slate-200 sm:block" />
 
@@ -485,7 +879,10 @@ const handleLogout = () => {
 
   <button
     type="button"
-    onClick={() => setProfileOpen(!profileOpen)}
+    onClick={() => {
+      setProfileOpen(!profileOpen);
+      setNotificationOpen(false);
+    }}
     className="flex items-center gap-3 rounded-xl p-1.5 transition hover:bg-[#F5F8FA]"
   >
 

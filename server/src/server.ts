@@ -20,6 +20,7 @@ import branchRoutes from "./routes/branchRoutes.js";
 import stockTransferRoutes from "./routes/stockTransferRoutes.js";
 import auditRoutes from "./routes/auditRoutes.js";
 import supportRoutes from "./routes/supportRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
 
 const app = express();
 
@@ -87,6 +88,14 @@ app.use(
   authenticateToken,
   authorizeRoles("admin", "manager", "cashier"),
   supportRoutes
+);
+
+
+app.use(
+  "/api/notifications",
+  authenticateToken,
+  authorizeRoles("admin", "manager", "cashier"),
+  notificationRoutes
 );
 
 app.use("/api/super-admin", superAdminRoutes);

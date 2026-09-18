@@ -190,7 +190,7 @@ export default function AuditAnalytics() {
     try {
       const feedParams = buildParams(true);
       feedParams.set("page", String(page));
-      feedParams.set("limit", "25");
+      feedParams.set("limit", "6");
 
       const summaryParams = buildParams(false);
 
@@ -228,7 +228,7 @@ export default function AuditAnalytics() {
         },
         pagination: safeFeed?.pagination ?? {
           page,
-          limit: 25,
+          limit: 6,
           total: 0,
           totalPages: 1,
           hasPreviousPage: false,
@@ -583,8 +583,21 @@ export default function AuditAnalytics() {
 
             <div className="flex items-center justify-between border-t border-slate-200 px-5 py-4 sm:px-6">
               <p className="text-sm text-slate-500">
-                Page {feed?.pagination.page || 1} of{" "}
-                {feed?.pagination.totalPages || 1}
+                {feed?.pagination.total ? (
+                  <>
+                    Showing{" "}
+                    {(feed.pagination.page - 1) * feed.pagination.limit + 1}–
+                    {Math.min(
+                      feed.pagination.page * feed.pagination.limit,
+                      feed.pagination.total
+                    )}{" "}
+                    of {feed.pagination.total.toLocaleString()} events
+                    <span className="mx-2 text-slate-300">•</span>
+                    Page {feed.pagination.page} of {feed.pagination.totalPages}
+                  </>
+                ) : (
+                  "No events"
+                )}
               </p>
 
               <div className="flex gap-2">

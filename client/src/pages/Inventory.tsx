@@ -565,6 +565,8 @@ function Inventory() {
         return;
       }
 
+      window.dispatchEvent(new Event("invent-pos:notifications-refresh"));
+
       await Promise.all([
         fetchProducts(selectedBranchId),
         fetchStockMovements(selectedBranchId),
@@ -617,6 +619,10 @@ function Inventory() {
         alert(errorData.message || "Failed to adjust stock");
         return;
       }
+
+      window.dispatchEvent(
+        new Event("invent-pos:notifications-refresh")
+      );
 
       await Promise.all([
         fetchProducts(selectedBranchId),
@@ -681,6 +687,8 @@ function Inventory() {
         alert(data.message || "Failed to record stock purchase");
         return;
       }
+
+      window.dispatchEvent(new Event("invent-pos:notifications-refresh"));
 
       await Promise.all([
         fetchProducts(selectedBranchId),

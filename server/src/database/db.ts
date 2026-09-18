@@ -1683,6 +1683,82 @@ db.exec(`
 `);
 
 
+// ==========================================================
+// NOTIFICATIONS / TENANT NOTIFICATION CENTER
+// Persistent organization-scoped alerts for operational,
+// support, subscription, inventory, and system events.
+// A notification may target one user or the whole organization.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL,
+    user_id INTEGER,
+    branch_id INTEGER,
+    type TEXT NOT NULL DEFAULT 'system'
+      CHECK (
+        type IN (
+          'inventory',
+          'support',
+          'subscription',
+          'staff',
+          'security',
+          'system'
+        )
+      ),
+    severity TEXT NOT NULL DEFAULT 'info'
+      CHECK (
+        severity IN (
+          'info',
+          'success',
+          'warning',
+          'critical'
+        )
+      ),
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id TEXT,
+    action_url TEXT,
+    is_read INTEGER NOT NULL DEFAULT 0
+      CHECK (is_read IN (0, 1)),
+    read_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (organization_id)
+      REFERENCES organizations(id),
+
+    FOREIGN KEY (user_id)
+      REFERENCES users(id),
+
+    FOREIGN KEY (branch_id)
+      REFERENCES branches(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_organization
+    ON notifications(organization_id);
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_org_user
+    ON notifications(organization_id, user_id);
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_org_branch
+    ON notifications(organization_id, branch_id);
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_org_read
+    ON notifications(organization_id, is_read);
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_org_created
+    ON notifications(organization_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_user_unread
+    ON notifications(organization_id, user_id, is_read, created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_entity
+    ON notifications(organization_id, entity_type, entity_id);
+`);
+
+
 const insertCategory = db.prepare(`
   INSERT OR IGNORE INTO categories (name)
   VALUES (?)

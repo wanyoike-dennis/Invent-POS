@@ -979,6 +979,10 @@ function Sales() {
       setPastMpesaCode("");
       setPastPaymentMethod("Cash");
 
+      window.dispatchEvent(
+        new Event("invent-pos:notifications-refresh")
+      );
+
       await fetchProducts();
       await fetchSalesHistory();
       await viewSaleDetails(data.sale.id);
@@ -1116,6 +1120,10 @@ function Sales() {
       setMpesaCode("");
       setPaymentMethod("Cash");
       setSelectedCustomerId("");
+
+      window.dispatchEvent(
+        new Event("invent-pos:notifications-refresh")
+      );
 
       await fetchProducts();
       await fetchSalesHistory();
