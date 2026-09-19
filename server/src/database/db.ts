@@ -1759,6 +1759,36 @@ db.exec(`
 `);
 
 
+// ==========================================================
+// PASSWORD RESET CODES
+// Self-service password recovery for tenant users.
+// Codes are stored as hashes, expire automatically, and are single-use.
+// ==========================================================
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS password_reset_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    code_hash TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_password_reset_codes_user
+    ON password_reset_codes(user_id);
+
+  CREATE INDEX IF NOT EXISTS idx_password_reset_codes_user_active
+    ON password_reset_codes(user_id, used_at, expires_at);
+
+  CREATE INDEX IF NOT EXISTS idx_password_reset_codes_expires
+    ON password_reset_codes(expires_at);
+`);
+
+
 const insertCategory = db.prepare(`
   INSERT OR IGNORE INTO categories (name)
   VALUES (?)
